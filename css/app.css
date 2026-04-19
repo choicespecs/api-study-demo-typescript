@@ -663,6 +663,26 @@ code {
 }
 #content > * { animation: fadeIn .2s ease; }
 
+/* ── SIM BLOCK ────────────────────────────────────────────── */
+.sim-block { margin-bottom: 16px; }
+.sim-block .response-viewer { margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.sim-block > div:last-child:not(:empty) {
+  border: 1px solid rgba(255,255,255,.08);
+  border-top: none;
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  animation: fadeIn .25s ease;
+}
+.sim-sending {
+  color: #94a3b8;
+  font-style: italic;
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
 /* ── COPY BUTTON FEEDBACK ─────────────────────────────────── */
 .btn-copied { background: var(--success) !important; color: #fff !important; }
 

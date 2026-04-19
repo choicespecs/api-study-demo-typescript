@@ -42,9 +42,11 @@ const DEMO_JWT = [
   'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
 ].join('.');
 
-// ── COPY CLIPS ────────────────────────────────────────────────
+// ── COPY CLIPS & SIM REGISTRY ─────────────────────────────────
 let _clipIdx = 0;
 const _clips = {};
+let _simIdx = 0;
+const _sims = {};
 
 // ── STATE ────────────────────────────────────────────────────
 const State = {
@@ -156,6 +158,50 @@ window._clip = function(id, btn) {
     btn.classList.add('btn-success');
     setTimeout(() => { btn.textContent = t; btn.classList.remove('btn-success'); }, 1500);
   }).catch(() => {});
+};
+
+// ── INTERACTIVE SIMULATION BLOCK ──────────────────────────────
+function simBlock(curlCmd, method, url, reqHeaders, reqBody, status, respBody, opts = {}) {
+  const id = 'sim-' + (++_simIdx);
+  const curlId = 'scurl-' + id;
+  _sims[id] = { method, url, reqHeaders: reqHeaders || {}, reqBody, status, respBody, delay: opts.delay || 450 };
+  _clips[curlId] = curlCmd;
+  return `
+    <div class="sim-block">
+      <div class="response-viewer">
+        <div class="response-header">
+          <span class="response-label">Shell</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="_runSim('${id}',this)">▶ Run</button>
+            <button class="btn btn-secondary btn-sm" onclick="_clip('${curlId}',this)">Copy</button>
+          </div>
+        </div>
+        <div class="response-body" style="white-space:pre-wrap;word-break:break-all">${escHtml(curlCmd)}</div>
+      </div>
+      <div id="${id}"></div>
+    </div>`;
+}
+
+window._runSim = async function(id, btn) {
+  const sim = _sims[id];
+  if (!sim) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (btn) btn.disabled = true;
+  el.innerHTML = `
+    <div class="http-exchange">
+      <div>${requestViewer(sim.method, sim.url, sim.reqHeaders, sim.reqBody)}</div>
+      <div class="response-viewer">
+        <div class="response-header"><span class="response-label">Response</span></div>
+        <div class="response-body sim-sending">⏳ Sending request…</div>
+      </div>
+    </div>`;
+  await sleep(sim.delay);
+  el.innerHTML = `<div class="http-exchange">
+    <div>${requestViewer(sim.method, sim.url, sim.reqHeaders, sim.reqBody)}</div>
+    <div>${responseViewer({ status: sim.status, body: sim.respBody })}</div>
+  </div>`;
+  if (btn) btn.disabled = false;
 };
 
 // ── JWT UTILITIES ─────────────────────────────────────────────
@@ -441,7 +487,8 @@ function home() {
     </div>
 
     <div class="card">
-      <div class="card-title">🔑 Demo Credentials (for the Java backend)</div>
+      <div class="card-title">🔑 Demo Credentials</div>
+      <div class="text-sm text-muted" style="margin-bottom:10px">These are the identities used in the simulations throughout this guide.</div>
       <table class="cred-table">
         <thead><tr><th>Type</th><th>Identifier</th><th>Secret</th><th>Roles / Scopes</th></tr></thead>
         <tbody>
@@ -461,9 +508,13 @@ function home() {
     </div>
 
     <div class="card">
-      <div class="card-title">🚀 Quick Start (Java Backend)</div>
-      <div class="text-sm text-muted" style="margin-bottom:12px">Run the Spring Boot backend to make the curl examples live:</div>
-      ${curlBlock('git clone https://github.com/christophermlee2/java-api-study-demo\ncd java-api-study-demo\nmvn spring-boot:run\n# Then visit http://localhost:8080')}
+      <div class="card-title">💡 How to Use This Guide</div>
+      <div class="text-sm" style="line-height:2">
+        Each topic has <strong>interactive simulations</strong> — no server required.<br>
+        Click <strong>▶ Run</strong> on any Shell block to simulate the API call and see the request + response.<br>
+        Use <strong>Copy</strong> to grab the curl command for reference alongside the
+        <a href="https://github.com/christophermlee2/java-api-study-demo" target="_blank">Java backend demo ↗</a>.
+      </div>
     </div>`;
 }
 
@@ -519,25 +570,44 @@ function authJwt() {
     </div>
 
     <div class="section-heading">Try It — Step 1: Login</div>
-    ${curlBlock('curl -X POST http://localhost:8080/api/auth/login \\\n  -H "Content-Type: application/json" \\\n  -d \'{"username":"user","password":"password"}\'')}
-    ${exampleExchange('POST', '/api/auth/login',
+    ${simBlock(
+      'curl -X POST /api/auth/login \\\n  -H "Content-Type: application/json" \\\n  -d \'{"username":"user","password":"password"}\'',
+      'POST', '/api/auth/login',
       { 'Content-Type': 'application/json' },
       { username: 'user', password: '●●●●●●●●' },
       200,
-      { accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIi4uLn0.sig', refreshToken: 'eyJhbGci...', tokenType: 'Bearer', expiresIn: 900 }
+      { accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIiwicm9sZXMiOlsiUk9MRV9VU0VSIl0sImlhdCI6MTcwNDA2NzIwMCwiZXhwIjoxNzA0MDY4MTAwfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c', refreshToken: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIiwiZXhwIjoxNzA0MTUzNjAwfQ.refresh_sig', tokenType: 'Bearer', expiresIn: 900 }
     )}
 
     <div class="section-heading">Try It — Step 2: Call a Protected Endpoint</div>
-    ${curlBlock('curl http://localhost:8080/api/jwt/protected \\\n  -H "Authorization: Bearer <accessToken>"')}
-    ${exampleExchange('GET', '/api/jwt/protected',
+    ${simBlock(
+      'curl /api/jwt/protected \\\n  -H "Authorization: Bearer <accessToken>"',
+      'GET', '/api/jwt/protected',
       { 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…' },
       null,
       200,
       { message: 'You accessed a JWT-protected endpoint', user: 'user', roles: ['ROLE_USER'] }
     )}
 
-    <div class="section-heading">Try It — Step 3: Refresh Token</div>
-    ${curlBlock('curl -X POST http://localhost:8080/api/auth/refresh \\\n  -H "Content-Type: application/json" \\\n  -d \'{"refreshToken":"<refreshToken>"}\'')}`;
+    <div class="section-heading">Try It — Step 3: Expired / Invalid Token (401)</div>
+    ${simBlock(
+      'curl /api/jwt/protected \\\n  -H "Authorization: Bearer eyJhbGci...expiredToken"',
+      'GET', '/api/jwt/protected',
+      { 'Authorization': 'Bearer eyJhbGci...expiredToken' },
+      null,
+      401,
+      { type: '/errors/unauthorized', title: 'Unauthorized', status: 401, detail: 'JWT token has expired' }
+    )}
+
+    <div class="section-heading">Try It — Step 4: Refresh Token</div>
+    ${simBlock(
+      'curl -X POST /api/auth/refresh \\\n  -H "Content-Type: application/json" \\\n  -d \'{"refreshToken":"<refreshToken>"}\'',
+      'POST', '/api/auth/refresh',
+      { 'Content-Type': 'application/json' },
+      { refreshToken: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIiwiZXhwIjoxNzA0MTUzNjAwfQ.refresh_sig' },
+      200,
+      { accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIiwicm9sZXMiOlsiUk9MRV9VU0VSIl0sImlhdCI6MTcwNDA2OTAwMCwiZXhwIjoxNzA0MDY5OTAwfQ.newSig', tokenType: 'Bearer', expiresIn: 900 }
+    )}`;
 }
 
 // ── PAGE: BASIC AUTH ──────────────────────────────────────────
@@ -582,24 +652,32 @@ function authBasic() {
       </div>
     </div>
 
-    <div class="section-heading">Try It — Any Role Endpoint</div>
-    ${curlBlock('curl http://localhost:8080/api/basic/protected \\\n  -H "Authorization: Basic $(echo -n user:password | base64)"')}
-    ${exampleExchange('GET', '/api/basic/protected',
+    <div class="section-heading">Try It — Any Role Endpoint (200 OK)</div>
+    ${simBlock(
+      'curl /api/basic/protected \\\n  -H "Authorization: Basic $(echo -n user:password | base64)"',
+      'GET', '/api/basic/protected',
       { Authorization: 'Basic dXNlcjpwYXNzd29yZA==' },
       null, 200,
       { message: 'Basic auth successful', user: 'user', roles: ['ROLE_USER'] }
     )}
 
-    <div class="section-heading">Try It — Admin Only (403 with user)</div>
-    ${curlBlock('curl http://localhost:8080/api/basic/admin \\\n  -H "Authorization: Basic $(echo -n user:password | base64)"')}
-    ${exampleExchange('GET', '/api/basic/admin',
+    <div class="section-heading">Try It — Admin Only (403 with user credentials)</div>
+    ${simBlock(
+      'curl /api/basic/admin \\\n  -H "Authorization: Basic $(echo -n user:password | base64)"',
+      'GET', '/api/basic/admin',
       { Authorization: 'Basic dXNlcjpwYXNzd29yZA==' },
       null, 403,
       { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'Access denied — ADMIN role required' }
     )}
 
     <div class="section-heading">Try It — Wrong Password (401)</div>
-    ${curlBlock('curl http://localhost:8080/api/basic/protected \\\n  -H "Authorization: Basic $(echo -n user:wrongpassword | base64)"')}`;
+    ${simBlock(
+      'curl /api/basic/protected \\\n  -H "Authorization: Basic $(echo -n user:wrongpassword | base64)"',
+      'GET', '/api/basic/protected',
+      { Authorization: 'Basic dXNlcjp3cm9uZ3Bhc3N3b3Jk' },
+      null, 401,
+      { type: '/errors/unauthorized', title: 'Unauthorized', status: 401, detail: 'Bad credentials' }
+    )}`;
 }
 
 // ── PAGE: API KEY ─────────────────────────────────────────────
@@ -642,20 +720,28 @@ function authApiKey() {
       </div>
     </div>
 
-    <div class="section-heading">Try It — User Key</div>
-    ${curlBlock('curl http://localhost:8080/api/apikey/data \\\n  -H "X-API-Key: demo-api-key-user-12345"')}
-    ${exampleExchange('GET', '/api/apikey/data',
+    <div class="section-heading">Try It — User Key (200 OK)</div>
+    ${simBlock(
+      'curl /api/apikey/data \\\n  -H "X-API-Key: demo-api-key-user-12345"',
+      'GET', '/api/apikey/data',
       { 'X-API-Key': 'demo-api-key-user-12345' },
       null, 200,
       { message: 'API key authenticated', keyId: 'key-user-001', owner: 'user@example.com', roles: ['USER'] }
     )}
 
-    <div class="section-heading">Try It — Admin Key</div>
-    ${curlBlock('curl http://localhost:8080/api/apikey/admin \\\n  -H "X-API-Key: demo-api-key-admin-12345"')}
+    <div class="section-heading">Try It — Admin Key (200 OK)</div>
+    ${simBlock(
+      'curl /api/apikey/admin \\\n  -H "X-API-Key: demo-api-key-admin-12345"',
+      'GET', '/api/apikey/admin',
+      { 'X-API-Key': 'demo-api-key-admin-12345' },
+      null, 200,
+      { message: 'Admin access granted', keyId: 'key-admin-001', owner: 'admin@example.com', roles: ['ADMIN', 'USER'] }
+    )}
 
     <div class="section-heading">Try It — Expired Key (401)</div>
-    ${curlBlock('curl http://localhost:8080/api/apikey/data \\\n  -H "X-API-Key: demo-api-key-expired-12345"')}
-    ${exampleExchange('GET', '/api/apikey/data',
+    ${simBlock(
+      'curl /api/apikey/data \\\n  -H "X-API-Key: demo-api-key-expired-12345"',
+      'GET', '/api/apikey/data',
       { 'X-API-Key': 'demo-api-key-expired-12345' },
       null, 401,
       { type: '/errors/unauthorized', title: 'Unauthorized', status: 401, detail: 'API key has expired' }
@@ -702,17 +788,49 @@ function oauthPage() {
 
     <div class="section-heading">Flow 1 — Client Credentials (Machine-to-Machine)</div>
     <div class="alert alert-info text-sm">No user involved — the client authenticates directly with its own credentials.</div>
-    ${curlBlock('# Step 1: Get a token\ncurl -X POST http://localhost:8080/oauth2/token \\\n  -H "Authorization: Basic $(echo -n machine-client:machine-secret | base64)" \\\n  -H "Content-Type: application/x-www-form-urlencoded" \\\n  -d "grant_type=client_credentials&scope=read"')}
-    ${exampleExchange('POST', '/oauth2/token',
+
+    <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>Step 1:</strong> Get a token</div>
+    ${simBlock(
+      'curl -X POST /oauth2/token \\\n  -H "Authorization: Basic $(echo -n machine-client:machine-secret | base64)" \\\n  -H "Content-Type: application/x-www-form-urlencoded" \\\n  -d "grant_type=client_credentials&scope=read"',
+      'POST', '/oauth2/token',
       { Authorization: 'Basic bWFjaGluZS1jbGllbnQ6bWFjaGluZS1zZWNyZXQ=', 'Content-Type': 'application/x-www-form-urlencoded' },
       'grant_type=client_credentials&scope=read',
       200,
-      { access_token: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...', token_type: 'Bearer', expires_in: 300, scope: 'read' }
+      { access_token: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtYWNoaW5lLWNsaWVudCIsInNjb3BlIjoicmVhZCIsImV4cCI6MTcwNDA2NzUwMH0.m2m_sig', token_type: 'Bearer', expires_in: 300, scope: 'read' }
     )}
-    ${curlBlock('# Step 2: Call the resource server with the token\ncurl http://localhost:8080/api/oauth/data \\\n  -H "Authorization: Bearer <access_token>"')}
+
+    <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>Step 2:</strong> Call the resource server with the token</div>
+    ${simBlock(
+      'curl /api/oauth/data \\\n  -H "Authorization: Bearer <access_token>"',
+      'GET', '/api/oauth/data',
+      { Authorization: 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9…' },
+      null,
+      200,
+      { message: 'OAuth2-protected data', client: 'machine-client', scope: 'read', data: [{ id: 1, value: 'secret-item-1' }] }
+    )}
 
     <div class="section-heading">Flow 2 — Authorization Code (User Login)</div>
-    ${curlBlock('# Step 1: Redirect user to authorization endpoint\nGET http://localhost:8080/oauth2/authorize\n  ?client_id=web-client\n  &response_type=code\n  &redirect_uri=http://localhost:8080/api/oauth/callback\n  &scope=openid+read\n\n# Step 2: User logs in and approves\n# Browser redirects to: /api/oauth/callback?code=AUTH_CODE\n\n# Step 3: Exchange code for tokens\ncurl -X POST http://localhost:8080/oauth2/token \\\n  -H "Authorization: Basic $(echo -n web-client:web-secret | base64)" \\\n  -H "Content-Type: application/x-www-form-urlencoded" \\\n  -d "grant_type=authorization_code&code=AUTH_CODE&redirect_uri=http://localhost:8080/api/oauth/callback"')}
+    <div class="alert alert-info text-sm">User-facing flow — the user approves the application's access in a browser.</div>
+
+    <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>Step 1:</strong> Redirect user to the authorization endpoint (browser redirect)</div>
+    ${simBlock(
+      'GET /oauth2/authorize\n  ?client_id=web-client\n  &response_type=code\n  &redirect_uri=/api/oauth/callback\n  &scope=openid+read',
+      'GET', '/oauth2/authorize?client_id=web-client&response_type=code&scope=openid+read',
+      {},
+      null,
+      302,
+      { location: '/login', note: 'Browser is redirected to login page. After user approves, redirected to: /api/oauth/callback?code=AUTH_CODE' }
+    )}
+
+    <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>Step 2:</strong> Exchange auth code for tokens</div>
+    ${simBlock(
+      'curl -X POST /oauth2/token \\\n  -H "Authorization: Basic $(echo -n web-client:web-secret | base64)" \\\n  -H "Content-Type: application/x-www-form-urlencoded" \\\n  -d "grant_type=authorization_code&code=AUTH_CODE&redirect_uri=/api/oauth/callback"',
+      'POST', '/oauth2/token',
+      { Authorization: 'Basic d2ViLWNsaWVudDp3ZWItc2VjcmV0', 'Content-Type': 'application/x-www-form-urlencoded' },
+      'grant_type=authorization_code&code=AUTH_CODE&redirect_uri=/api/oauth/callback',
+      200,
+      { access_token: 'eyJhbGciOiJSUzI1NiJ9.user_claims.sig', id_token: 'eyJhbGciOiJSUzI1NiJ9.oidc_claims.sig', token_type: 'Bearer', expires_in: 300, scope: 'openid read' }
+    )}
 
     <div class="card">
       <div class="card-title">Grant Type Comparison</div>
@@ -771,15 +889,31 @@ function rbacPage() {
     </div>
 
     <div class="section-heading">Try It — Viewer accessing user endpoint (403)</div>
-    ${curlBlock('# Login as viewer to get a token\nVIEWER_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \\\n  -H "Content-Type: application/json" \\\n  -d \'{"username":"viewer","password":"password"}\' | jq -r .accessToken)\n\n# Try to access user-level endpoint\ncurl http://localhost:8080/api/rbac/user \\\n  -H "Authorization: Bearer $VIEWER_TOKEN"')}
-    ${exampleExchange('GET', '/api/rbac/user',
-      { Authorization: 'Bearer eyJhbGci... (viewer token)' },
+    ${simBlock(
+      'curl /api/rbac/user \\\n  -H "Authorization: Bearer <viewer_token>"',
+      'GET', '/api/rbac/user',
+      { Authorization: 'Bearer eyJhbGci... (viewer token — roles: [ROLE_VIEWER])' },
       null, 403,
       { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'Access denied — USER role required' }
     )}
 
+    <div class="section-heading">Try It — User accessing viewer endpoint (200)</div>
+    ${simBlock(
+      'curl /api/rbac/viewer \\\n  -H "Authorization: Bearer <user_token>"',
+      'GET', '/api/rbac/viewer',
+      { Authorization: 'Bearer eyJhbGci... (user token — roles: [ROLE_USER])' },
+      null, 200,
+      { message: 'Viewer endpoint — accessible by VIEWER, USER, and ADMIN', user: 'user', roles: ['ROLE_USER'] }
+    )}
+
     <div class="section-heading">Try It — Admin accessing any endpoint (200)</div>
-    ${curlBlock('ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \\\n  -H "Content-Type: application/json" \\\n  -d \'{"username":"admin","password":"password"}\' | jq -r .accessToken)\n\ncurl http://localhost:8080/api/rbac/admin \\\n  -H "Authorization: Bearer $ADMIN_TOKEN"')}`;
+    ${simBlock(
+      'curl /api/rbac/admin \\\n  -H "Authorization: Bearer <admin_token>"',
+      'GET', '/api/rbac/admin',
+      { Authorization: 'Bearer eyJhbGci... (admin token — roles: [ROLE_ADMIN, ROLE_USER])' },
+      null, 200,
+      { message: 'Admin endpoint — ADMIN role required', user: 'admin', roles: ['ROLE_ADMIN', 'ROLE_USER'] }
+    )}`;
 }
 
 // ── PAGE: RATE LIMITING ───────────────────────────────────────
@@ -821,8 +955,24 @@ function rateLimitPage() {
       </table>
     </div>
 
-    <div class="section-heading">Try It — Trigger a 429</div>
-    ${curlBlock('# Hit the strict endpoint 6 times to exhaust the 5-token bucket\nfor i in {1..6}; do\n  echo "Request $i:"\n  curl -s -o /dev/null -w "%{http_code}\\n" http://localhost:8080/api/rate/strict\ndone')}`;
+    <div class="section-heading">Try It — Normal Request (200 OK)</div>
+    ${simBlock(
+      'curl /api/rate/standard \\\n  -H "X-Forwarded-For: 203.0.113.42"',
+      'GET', '/api/rate/standard',
+      { 'X-Forwarded-For': '203.0.113.42' },
+      null, 200,
+      { message: 'OK', remaining: 19, limit: 20, 'X-Rate-Limit-Remaining': 19, 'X-Rate-Limit-Reset': 1704067260 }
+    )}
+
+    <div class="section-heading">Try It — Bucket Exhausted (429)</div>
+    ${simBlock(
+      '# After exhausting all tokens:\ncurl /api/rate/strict',
+      'GET', '/api/rate/strict',
+      {},
+      null, 429,
+      { type: '/errors/rate-limited', title: 'Too Many Requests', status: 429, detail: 'Rate limit exceeded. Bucket is empty.', retryAfter: 60 }
+    )}
+    <div class="alert alert-info text-sm">Use the interactive buckets above to simulate exhaustion — click "Rapid Fire ×10" on the Strict bucket, then click Run above.</div>`;
 }
 
 function rateLimitCard(key, label, endpoint, max, desc) {
@@ -933,8 +1083,33 @@ function circuitBreakerPage() {
       </table>
     </div>
 
-    <div class="section-heading">Try It — Against the Java Backend</div>
-    ${curlBlock('# Send success requests\ncurl http://localhost:8080/api/timeout/unreliable?fail=false\n\n# Send failure requests (opens circuit after 5+ at 50% failure rate)\ncurl http://localhost:8080/api/timeout/unreliable?fail=true\n\n# Check circuit breaker state via Actuator\ncurl http://localhost:8080/actuator/circuitbreakers')}`;
+    <div class="section-heading">Try It — Success Request (CLOSED circuit)</div>
+    ${simBlock(
+      'curl /api/timeout/unreliable?fail=false',
+      'GET', '/api/timeout/unreliable?fail=false',
+      {},
+      null, 200,
+      { result: 'success', message: 'Downstream call succeeded', circuitState: 'CLOSED' }
+    )}
+
+    <div class="section-heading">Try It — Failure Request (toward OPEN)</div>
+    ${simBlock(
+      'curl /api/timeout/unreliable?fail=true',
+      'GET', '/api/timeout/unreliable?fail=true',
+      {},
+      null, 500,
+      { error: 'Internal Server Error', detail: 'Simulated downstream failure', circuitState: 'CLOSED', failureRate: '60%' }
+    )}
+
+    <div class="section-heading">Try It — Circuit OPEN → Fallback (503)</div>
+    ${simBlock(
+      '# After too many failures — circuit opens:\ncurl /api/timeout/unreliable?fail=false',
+      'GET', '/api/timeout/unreliable?fail=false',
+      {},
+      null, 503,
+      { result: 'FALLBACK — circuit is OPEN, call bypassed', state: 'OPEN', detail: 'Downstream service is unhealthy. Returning cached fallback.' }
+    )}
+    <div class="alert alert-info text-sm">Use the interactive simulation above to drive the circuit through states, then observe the 503 fallback.</div>`;
 }
 
 function refreshCb() {
@@ -998,7 +1173,14 @@ function hangingApisPage() {
           <strong>Thread impact:</strong> 1 thread blocked for N seconds<br>
           <strong>Response time:</strong> always N seconds
         </div>
-        ${curlBlock('# This will hang for 5 seconds — holding a thread\ncurl http://localhost:8080/api/hanging/no-timeout?delay=5')}
+        ${simBlock(
+          'curl /api/hanging/no-timeout?delay=5',
+          'GET', '/api/hanging/no-timeout?delay=5',
+          {},
+          null, 200,
+          { message: 'Completed after full delay', delayMs: 5000, threadBlocked: true, warning: '1 Tomcat thread was held for 5 seconds' },
+          { delay: 1200 }
+        )}
       </div>
 
       <div class="card">
@@ -1015,7 +1197,14 @@ function hangingApisPage() {
           <strong>Thread impact:</strong> request thread freed at deadline<br>
           <strong>Response time:</strong> min(delay, deadline)
         </div>
-        ${curlBlock('# delay=8 but deadline=3 → responds in 3s with 504\ncurl "http://localhost:8080/api/hanging/with-deadline?delay=8&deadline=3"')}
+        ${simBlock(
+          '# delay=8 but deadline=3 → responds in 3s with 504\ncurl "/api/hanging/with-deadline?delay=8&deadline=3"',
+          'GET', '/api/hanging/with-deadline?delay=8&deadline=3',
+          {},
+          null, 504,
+          { type: '/errors/timeout', title: 'Gateway Timeout', status: 504, detail: 'Downstream call exceeded 3s deadline', deadlineMs: 3000, actualDelayMs: 8000 },
+          { delay: 900 }
+        )}
       </div>
 
       <div class="card">
@@ -1031,7 +1220,14 @@ function hangingApisPage() {
           <strong>Connect timeout:</strong> 2s (hardcoded)<br>
           <strong>Request timeout:</strong> configurable
         </div>
-        ${curlBlock('curl "http://localhost:8080/api/hanging/http-client?delay=8&timeout=3"')}
+        ${simBlock(
+          'curl "/api/hanging/http-client?delay=8&timeout=3"',
+          'GET', '/api/hanging/http-client?delay=8&timeout=3',
+          {},
+          null, 504,
+          { type: '/errors/timeout', title: 'Client Timeout', status: 504, detail: 'HTTP client read timeout after 3000ms. Note: server-side thread continues running.', clientTimeout: 3000, serverDelayMs: 8000 },
+          { delay: 900 }
+        )}
       </div>
     </div>
 
@@ -1093,7 +1289,24 @@ function thirdPartyPage() {
           Signature format: <code>X-Webhook-Signature: sha256=&lt;HMAC-SHA256(secret, timestamp.body)&gt;</code><br>
           Demo secret: <code>whsec_demo_secret_12345</code>
         </div>
-        ${curlBlock('# Send a valid signed webhook\ncurl -X POST http://localhost:8080/api/third-party/webhook/send-test \\\n  -H "Content-Type: application/json" \\\n  -d \'{"tamper":false,"replay_attack":false,"type":"payment.completed"}\'\n\n# Send a tampered payload (signature will fail)\ncurl -X POST http://localhost:8080/api/third-party/webhook/send-test \\\n  -H "Content-Type: application/json" \\\n  -d \'{"tamper":true,"replay_attack":false,"type":"payment.completed"}\'')}
+        ${simBlock(
+          'curl -X POST /api/third-party/webhook/receive \\\n  -H "Content-Type: application/json" \\\n  -H "X-Webhook-Signature: sha256=a7f3d9e2c1b4..." \\\n  -H "X-Webhook-Timestamp: 1704067200" \\\n  -d \'{"type":"payment.completed","data":{"amount":99.99}}\'',
+          'POST', '/api/third-party/webhook/receive',
+          { 'Content-Type': 'application/json', 'X-Webhook-Signature': 'sha256=a7f3d9e2c1b4f8e6...', 'X-Webhook-Timestamp': '1704067200' },
+          { type: 'payment.completed', data: { amount: 99.99 } },
+          200,
+          { received: true, eventId: 'evt_abc123', message: 'Webhook accepted and queued for processing' }
+        )}
+
+        <div class="text-sm text-muted mt-8" style="font-weight:600">Tampered payload — signature mismatch (401):</div>
+        ${simBlock(
+          'curl -X POST /api/third-party/webhook/receive \\\n  -H "X-Webhook-Signature: sha256=tampered_bad_sig" \\\n  -H "X-Webhook-Timestamp: 1704067200" \\\n  -d \'{"type":"payment.completed","data":{"amount":0}}\'',
+          'POST', '/api/third-party/webhook/receive',
+          { 'Content-Type': 'application/json', 'X-Webhook-Signature': 'sha256=tampered_bad_sig', 'X-Webhook-Timestamp': '1704067200' },
+          { type: 'payment.completed', data: { amount: 0 } },
+          401,
+          { type: '/errors/unauthorized', title: 'Unauthorized', status: 401, detail: 'Webhook signature verification failed' }
+        )}
       </div>
 
       <div class="card">
@@ -1242,17 +1455,37 @@ function partnerApiPage() {
       </div>
     </div>
 
-    <div class="section-heading">Try It — Partner Auth Info</div>
-    ${curlBlock('# PREMIUM partner (Alpha)\ncurl http://localhost:8080/api/partner/auth-info \\\n  -H "X-Partner-Key: partner-alpha-key-12345"\n\n# FREE partner (Gamma) — fewer scopes\ncurl http://localhost:8080/api/partner/auth-info \\\n  -H "X-Partner-Key: partner-gamma-key-12345"')}
-    ${exampleExchange('GET', '/api/partner/auth-info',
+    <div class="section-heading">Try It — PREMIUM Partner Auth Info</div>
+    ${simBlock(
+      'curl /api/partner/auth-info \\\n  -H "X-Partner-Key: partner-alpha-key-12345"',
+      'GET', '/api/partner/auth-info',
       { 'X-Partner-Key': 'partner-alpha-key-12345' },
       null, 200,
       { partnerId: 'alpha-corp', organizationName: 'Alpha Corp', tier: 'PREMIUM', scopes: ['catalog:read', 'orders:read', 'orders:write', 'catalog:write', 'analytics:read'], rateLimit: 10000 }
     )}
 
-    <div class="section-heading">Try It — Audit Log (PREMIUM only)</div>
-    ${curlBlock('# Works for Alpha (has analytics:read)\ncurl http://localhost:8080/api/partner/audit \\\n  -H "X-Partner-Key: partner-alpha-key-12345"\n\n# Fails for Gamma (no analytics:read scope)\ncurl http://localhost:8080/api/partner/audit \\\n  -H "X-Partner-Key: partner-gamma-key-12345"')}
-    ${exampleExchange('GET', '/api/partner/audit',
+    <div class="section-heading">Try It — FREE Partner Auth Info (fewer scopes)</div>
+    ${simBlock(
+      'curl /api/partner/auth-info \\\n  -H "X-Partner-Key: partner-gamma-key-12345"',
+      'GET', '/api/partner/auth-info',
+      { 'X-Partner-Key': 'partner-gamma-key-12345' },
+      null, 200,
+      { partnerId: 'gamma-corp', organizationName: 'Gamma Corp', tier: 'FREE', scopes: ['catalog:read'], rateLimit: 100 }
+    )}
+
+    <div class="section-heading">Try It — Audit Log: PREMIUM (200 OK)</div>
+    ${simBlock(
+      'curl /api/partner/audit \\\n  -H "X-Partner-Key: partner-alpha-key-12345"',
+      'GET', '/api/partner/audit',
+      { 'X-Partner-Key': 'partner-alpha-key-12345' },
+      null, 200,
+      { events: [{ id: 'evt_001', action: 'catalog.read', timestamp: '2024-01-01T10:00:00Z' }, { id: 'evt_002', action: 'orders.write', timestamp: '2024-01-01T10:01:00Z' }], total: 2 }
+    )}
+
+    <div class="section-heading">Try It — Audit Log: FREE Partner (403 Insufficient Scope)</div>
+    ${simBlock(
+      'curl /api/partner/audit \\\n  -H "X-Partner-Key: partner-gamma-key-12345"',
+      'GET', '/api/partner/audit',
       { 'X-Partner-Key': 'partner-gamma-key-12345' },
       null, 403,
       { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'Insufficient scope — analytics:read required', requiredScope: 'analytics:read', partnerTier: 'FREE' }
@@ -1356,8 +1589,23 @@ function paginationPage() {
       </div>
     </div>
 
-    <div class="section-heading">Try It — Against the Java Backend</div>
-    ${curlBlock('# First page\ncurl "http://localhost:8080/api/products?page=0&size=6&sort=name,asc"\n\n# Filter by category\ncurl "http://localhost:8080/api/products?page=0&size=6&category=Electronics"\n\n# Search\ncurl "http://localhost:8080/api/products?page=0&size=6&search=keyboard"')}`;
+    <div class="section-heading">Try It — First Page</div>
+    ${simBlock(
+      'curl "/api/products?page=0&size=6&sort=name,asc"',
+      'GET', '/api/products?page=0&size=6&sort=name,asc',
+      {},
+      null, 200,
+      { content: [{ id: 8, name: 'Air Fryer', category: 'Kitchen', price: 89.99 }, { id: 5, name: 'Bluetooth Speaker', category: 'Electronics', price: 59.99 }, { id: 20, name: 'Cast Iron Pan', category: 'Kitchen', price: 44.99 }, { id: 10, name: 'Clean Code', category: 'Books', price: 34.99 }, { id: 4, name: 'Coffee Maker', category: 'Kitchen', price: 49.99 }, { id: 6, name: 'Design Patterns', category: 'Books', price: 44.99 }], currentPage: 0, totalPages: 4, totalElements: 24, size: 6, hasNext: true, hasPrevious: false }
+    )}
+
+    <div class="section-heading">Try It — Filter by Category</div>
+    ${simBlock(
+      'curl "/api/products?page=0&size=6&category=Electronics"',
+      'GET', '/api/products?page=0&size=6&category=Electronics',
+      {},
+      null, 200,
+      { content: [{ id: 1, name: 'Wireless Headphones', category: 'Electronics', price: 79.99 }, { id: 5, name: 'Bluetooth Speaker', category: 'Electronics', price: 59.99 }, { id: 9, name: 'USB-C Hub', category: 'Electronics', price: 34.99 }], currentPage: 0, totalPages: 2, totalElements: 7, size: 6, hasNext: true, hasPrevious: false }
+    )}`;
 }
 
 function renderProductGrid(products) {
@@ -1403,15 +1651,26 @@ function versioningPage() {
       <div class="card">
         <div class="card-title"><span class="version-badge version-v1">V1</span> — Original shape</div>
         ${responseViewer({ status: 200, body: v1Body }, 'GET /api/v1/items')}
-        ${curlBlock('curl http://localhost:8080/api/v1/items\n# or with header: -H "X-API-Version: 1"\n# or with query:  ?version=1\n# or with Accept: application/vnd.demo.v1+json')}
+        ${simBlock(
+          'curl /api/v1/items\n# or: -H "X-API-Version: 1"\n# or: ?version=1\n# or: -H "Accept: application/vnd.demo.v1+json"',
+          'GET', '/api/v1/items',
+          { 'Accept': 'application/json' },
+          null, 200,
+          v1Body
+        )}
       </div>
       <div class="card">
         <div class="card-title"><span class="version-badge version-v2">V2</span> — Breaking change: price is now an object</div>
-        ${responseViewer({ status: 200, body: v2Body }, 'GET /api/v2/items')}
-        <div class="alert alert-warning text-sm mt-8">
+        <div class="alert alert-warning text-sm">
           V1 clients parsing <code>res.price * 1.1</code> would break on V2 — <code>price</code> is now an object, not a number.
         </div>
-        ${curlBlock('curl http://localhost:8080/api/v2/items')}
+        ${simBlock(
+          'curl /api/v2/items',
+          'GET', '/api/v2/items',
+          { 'Accept': 'application/json' },
+          null, 200,
+          v2Body
+        )}
       </div>
     </div>
 
@@ -1553,8 +1812,33 @@ function errorsPage() {
       </table>
     </div>
 
-    <div class="section-heading">Try It</div>
-    ${curlBlock('# 404 Not Found\ncurl http://localhost:8080/api/errors/404?id=999\n\n# 422 Validation Error\ncurl -X POST http://localhost:8080/api/errors/validate \\\n  -H "Content-Type: application/json" \\\n  -d \'{}\'\n\n# 403 Forbidden — user trying to access admin endpoint\ncurl http://localhost:8080/api/basic/admin \\\n  -H "Authorization: Basic $(echo -n user:password | base64)"')}`;
+    <div class="section-heading">Try It — 404 Not Found</div>
+    ${simBlock(
+      'curl /api/errors/404?id=999',
+      'GET', '/api/errors/404?id=999',
+      {},
+      null, 404,
+      { type: '/errors/not-found', title: 'Not Found', status: 404, detail: 'Product with ID 999 was not found', instance: '/api/products/999' }
+    )}
+
+    <div class="section-heading">Try It — 422 Validation Failed</div>
+    ${simBlock(
+      'curl -X POST /api/errors/validate \\\n  -H "Content-Type: application/json" \\\n  -d \'{}\'',
+      'POST', '/api/errors/validate',
+      { 'Content-Type': 'application/json' },
+      {},
+      422,
+      { type: '/errors/validation-failed', title: 'Validation Failed', status: 422, invalidParams: [{ field: 'name', reason: 'must not be blank' }, { field: 'price', reason: 'must be greater than 0' }] }
+    )}
+
+    <div class="section-heading">Try It — 500 Internal Server Error</div>
+    ${simBlock(
+      'curl /api/errors/500',
+      'GET', '/api/errors/500',
+      {},
+      null, 500,
+      { type: '/errors/internal', title: 'Internal Server Error', status: 500, detail: 'An unexpected error occurred. Please contact support.' }
+    )}`;
 }
 
 // ── PAGE: COMMON PROBLEMS ─────────────────────────────────────
@@ -1634,7 +1918,25 @@ function commonProblemsPage() {
       </table>
       <div class="divider"></div>
       <div class="text-sm" style="font-weight:600;margin-bottom:8px">Making POST idempotent with an Idempotency Key</div>
-      ${curlBlock('# Client generates a unique key per logical operation\ncurl -X POST http://localhost:8080/api/payments \\\n  -H "Idempotency-Key: pay-2024-abc123" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"amount":99.99,"currency":"USD"}\'\n\n# If the request times out and client retries with the same key,\n# server returns the SAME response as the first call — no double-charge.')}
+      <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>First call</strong> — creates the payment:</div>
+      ${simBlock(
+        'curl -X POST /api/payments \\\n  -H "Idempotency-Key: pay-2024-abc123" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"amount":99.99,"currency":"USD"}\'',
+        'POST', '/api/payments',
+        { 'Idempotency-Key': 'pay-2024-abc123', 'Content-Type': 'application/json' },
+        { amount: 99.99, currency: 'USD' },
+        201,
+        { paymentId: 'pmt_xyz789', amount: 99.99, currency: 'USD', status: 'completed', idempotencyKey: 'pay-2024-abc123', createdAt: '2024-01-01T10:00:00Z' }
+      )}
+
+      <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>Retry with same key</strong> — server returns the SAME response, no double-charge:</div>
+      ${simBlock(
+        '# Network timed out — client retries with the same key:\ncurl -X POST /api/payments \\\n  -H "Idempotency-Key: pay-2024-abc123" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"amount":99.99,"currency":"USD"}\'',
+        'POST', '/api/payments',
+        { 'Idempotency-Key': 'pay-2024-abc123', 'Content-Type': 'application/json', 'X-Idempotent-Replay': 'true' },
+        { amount: 99.99, currency: 'USD' },
+        200,
+        { paymentId: 'pmt_xyz789', amount: 99.99, currency: 'USD', status: 'completed', idempotencyKey: 'pay-2024-abc123', createdAt: '2024-01-01T10:00:00Z', note: 'Idempotent replay — original response returned, no new charge' }
+      )}
     </div>
 
     <div class="card">
