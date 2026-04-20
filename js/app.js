@@ -56,6 +56,12 @@ const State = {
   cbFailures: 0, cbSuccesses: 0, cbState: 'CLOSED', cbLog: [],
   paginationPage: 0, paginationSize: 6,
   paginationCategory: '', paginationSearch: '',
+  woProducts: [
+    { id: 1, name: 'iPhone 15', price: 999.99, category: 'Electronics', stock: 50 },
+    { id: 2, name: 'The Pragmatic Programmer', price: 49.99, category: 'Books', stock: 30 },
+    { id: 3, name: 'Running Shoes', price: 89.99, category: 'Sports', stock: 120 },
+  ],
+  woNextId: 4,
 };
 
 // ── UTILITIES ─────────────────────────────────────────────────
@@ -286,6 +292,7 @@ const pages = {
   'third-party': thirdPartyPage, 'partner-api': partnerApiPage,
   pagination: paginationPage, versioning: versioningPage,
   errors: errorsPage, 'common-problems': commonProblemsPage,
+  'write-ops': writeOpsPage,
 };
 
 function render() {
@@ -461,6 +468,164 @@ const handlers = {
     State.paginationPage++;
     handlers.paginationLoad();
   },
+
+  // ── Write Operations handlers ─────────────────────────────────────────────
+
+  woPost(btn) {
+    const name     = val('wo-name');
+    const priceRaw = val('wo-price');
+    const category = val('wo-category');
+    const stockRaw = val('wo-stock');
+    const body     = { name, price: priceRaw ? parseFloat(priceRaw) : undefined, category, stock: stockRaw ? parseInt(stockRaw) : 0 };
+
+    setHtml('wo-request', requestViewer('POST', '/api/products', { 'Content-Type': 'application/json' }, body));
+
+    if (!name || !priceRaw || !category) {
+      setHtml('wo-response', responseViewer({ status: 422, body: { type: '/errors/validation', title: 'Validation Failed', status: 422, fieldErrors: { name: name ? null : 'must not be blank', price: priceRaw ? null : 'must not be null' } } }, 'POST /api/products → 422'));
+      return;
+    }
+    const exists = State.woProducts.find(p => p.name === name);
+    if (exists) {
+      setHtml('wo-response', responseViewer({ status: 409, body: { type: '/errors/conflict', title: 'Conflict', status: 409, detail: `Product with name '${name}' already exists. GET /api/products/${exists.id} or PUT to update it.` } }, 'POST /api/products → 409'));
+      return;
+    }
+    const product = { id: State.woNextId++, name, price: parseFloat(priceRaw), category, stock: parseInt(stockRaw) || 0 };
+    State.woProducts.push(product);
+    setHtml('wo-response', responseViewer({ status: 201, headers: { 'Location': `/api/products/${product.id}` }, body: product }, 'POST /api/products → 201 Created'));
+    const idEl = document.getElementById('wo-id');
+    if (idEl) idEl.value = product.id;
+  },
+
+  woPostInvalid() {
+    const body = {};
+    setHtml('wo-request', requestViewer('POST', '/api/products', { 'Content-Type': 'application/json' }, body));
+    setHtml('wo-response', responseViewer({ status: 422, body: { type: '/errors/validation', title: 'Validation Failed', status: 422, fieldErrors: { name: 'must not be blank', price: 'must not be null', category: 'must not be blank' } } }, 'POST /api/products → 422 Validation Failed'));
+  },
+
+  woPostDuplicate() {
+    const body = { name: 'iPhone 15', price: 999.99, category: 'Electronics', stock: 50 };
+    setHtml('wo-request', requestViewer('POST', '/api/products', { 'Content-Type': 'application/json' }, body));
+    setHtml('wo-response', responseViewer({ status: 409, body: { type: '/errors/conflict', title: 'Conflict', status: 409, detail: "Product with name 'iPhone 15' already exists. GET /api/products/1 or PUT to update it." } }, 'POST /api/products → 409 Conflict'));
+  },
+
+  woPut() {
+    const id       = val('wo-id');
+    const name     = val('wo-name');
+    const priceRaw = val('wo-price');
+    const category = val('wo-category');
+    const stock    = parseInt(val('wo-stock')) || 0;
+    const body     = { name, price: parseFloat(priceRaw) || null, category, stock };
+    setHtml('wo-request', requestViewer('PUT', `/api/products/${id}`, { 'Content-Type': 'application/json' }, body));
+    if (!id) { setHtml('wo-response', responseViewer({ status: 400, body: { detail: 'Enter a product ID first (use POST to create one).' } })); return; }
+    const idx = State.woProducts.findIndex(p => p.id === parseInt(id));
+    if (idx === -1) {
+      setHtml('wo-response', responseViewer({ status: 404, body: { type: '/errors/not-found', title: 'Not Found', status: 404, detail: `Product ${id} not found.` } }, `PUT /api/products/${id} → 404`));
+      return;
+    }
+    const conflict = State.woProducts.find((p, i) => p.name === name && i !== idx);
+    if (conflict) {
+      setHtml('wo-response', responseViewer({ status: 409, body: { detail: `Name '${name}' is already taken by product ${conflict.id}.` } }, `PUT /api/products/${id} → 409`));
+      return;
+    }
+    State.woProducts[idx] = { ...State.woProducts[idx], name, price: parseFloat(priceRaw) || State.woProducts[idx].price, category, stock };
+    setHtml('wo-response', responseViewer({ status: 200, body: State.woProducts[idx] }, `PUT /api/products/${id} → 200 OK`));
+  },
+
+  woPutMissing() {
+    const body = { name: 'Ghost Product', price: 1.00, category: 'Test', stock: 0 };
+    setHtml('wo-request', requestViewer('PUT', '/api/products/99999', { 'Content-Type': 'application/json' }, body));
+    setHtml('wo-response', responseViewer({ status: 404, body: { type: '/errors/not-found', title: 'Not Found', status: 404, detail: 'Product 99999 not found.' } }, 'PUT /api/products/99999 → 404 Not Found'));
+  },
+
+  woPatch() {
+    const id    = val('wo-id');
+    const name  = val('wo-name');
+    const price = val('wo-price');
+    const patch = {};
+    if (name)  patch.name  = name;
+    if (price) patch.price = parseFloat(price);
+    setHtml('wo-request', requestViewer('PATCH', `/api/products/${id}`, { 'Content-Type': 'application/json' }, patch));
+    if (!id) { setHtml('wo-response', responseViewer({ status: 400, body: { detail: 'Enter a product ID first.' } })); return; }
+    const idx = State.woProducts.findIndex(p => p.id === parseInt(id));
+    if (idx === -1) {
+      setHtml('wo-response', responseViewer({ status: 404, body: { detail: `Product ${id} not found.` } }, `PATCH /api/products/${id} → 404`));
+      return;
+    }
+    if (name)  State.woProducts[idx].name  = name;
+    if (price) State.woProducts[idx].price = parseFloat(price);
+    setHtml('wo-response', responseViewer({ status: 200, body: State.woProducts[idx] }, `PATCH /api/products/${id} — only provided fields changed`));
+  },
+
+  woDelete() {
+    const id  = val('wo-id');
+    setHtml('wo-request', requestViewer('DELETE', `/api/products/${id}`, {}));
+    if (!id) { setHtml('wo-response', responseViewer({ status: 400, body: { detail: 'Enter a product ID first.' } })); return; }
+    const idx = State.woProducts.findIndex(p => p.id === parseInt(id));
+    if (idx === -1) {
+      setHtml('wo-response', responseViewer({ status: 404, body: { detail: `Product ${id} not found.` } }, `DELETE /api/products/${id} → 404`));
+      return;
+    }
+    State.woProducts.splice(idx, 1);
+    setHtml('wo-response', responseViewer({ status: 204, body: null }, `DELETE /api/products/${id} → 204 No Content`));
+    const idEl = document.getElementById('wo-id');
+    if (idEl) idEl.value = '';
+  },
+
+  woDeleteMissing() {
+    setHtml('wo-request', requestViewer('DELETE', '/api/products/99999', {}));
+    setHtml('wo-response', responseViewer({ status: 404, body: { type: '/errors/not-found', title: 'Not Found', status: 404, detail: 'Product 99999 not found.' } }, 'DELETE /api/products/99999 → 404 Not Found'));
+  },
+
+  woUpsertExisting() {
+    const body = { name: 'iPhone 15', price: 799.99, category: 'Electronics', stock: 999 };
+    setHtml('strategy-request', requestViewer('POST', '/api/products/upsert', { 'Content-Type': 'application/json' }, body));
+    const idx = State.woProducts.findIndex(p => p.name === 'iPhone 15');
+    if (idx !== -1) {
+      State.woProducts[idx] = { ...State.woProducts[idx], ...body };
+      setHtml('strategy-response', responseViewer({ status: 200, body: State.woProducts[idx] }, 'POST /upsert → 200 (existed, replaced)'));
+    } else {
+      const p = { id: State.woNextId++, ...body };
+      State.woProducts.push(p);
+      setHtml('strategy-response', responseViewer({ status: 201, body: p }, 'POST /upsert → 201 Created'));
+    }
+  },
+
+  woUpsertNew() {
+    const ts   = Date.now();
+    const body = { name: `New Gadget ${ts}`, price: 49.99, category: 'Electronics', stock: 10 };
+    setHtml('strategy-request', requestViewer('POST', '/api/products/upsert', { 'Content-Type': 'application/json' }, body));
+    const p = { id: State.woNextId++, ...body };
+    State.woProducts.push(p);
+    setHtml('strategy-response', responseViewer({ status: 201, body: p }, 'POST /upsert → 201 Created (did not exist)'));
+  },
+
+  woMergeExisting() {
+    const body = { name: 'iPhone 15', price: 1099.99, stock: 25 };
+    setHtml('strategy-request', requestViewer('POST', '/api/products/merge', { 'Content-Type': 'application/json' }, body));
+    const idx = State.woProducts.findIndex(p => p.name === 'iPhone 15');
+    if (idx !== -1) {
+      if (body.price !== undefined) State.woProducts[idx].price = body.price;
+      if (body.stock !== undefined) State.woProducts[idx].stock = body.stock;
+      setHtml('strategy-response', responseViewer({ status: 200, body: State.woProducts[idx] }, 'POST /merge → 200 (existed, only price+stock changed)'));
+    } else {
+      setHtml('strategy-response', responseViewer({ status: 404, body: { detail: 'iPhone 15 not found — try resetting by reloading.' } }));
+    }
+  },
+
+  woMergeNew() {
+    const ts   = Date.now();
+    const body = { name: `Merged Product ${ts}`, price: 19.99, category: 'Books', stock: 5 };
+    setHtml('strategy-request', requestViewer('POST', '/api/products/merge', { 'Content-Type': 'application/json' }, body));
+    const p = { id: State.woNextId++, ...body };
+    State.woProducts.push(p);
+    setHtml('strategy-response', responseViewer({ status: 201, body: p }, 'POST /merge → 201 Created (did not exist)'));
+  },
+
+  woMergeMissingRequired() {
+    const body = { name: `Incomplete Product ${Date.now()}` };
+    setHtml('strategy-request', requestViewer('POST', '/api/products/merge', { 'Content-Type': 'application/json' }, body));
+    setHtml('strategy-response', responseViewer({ status: 422, body: { type: '/errors/validation', title: 'Validation Failed', status: 422, fieldErrors: { price: 'required when creating a new product', category: 'required when creating a new product' } } }, 'POST /merge → 422 (new product, price required)'));
+  },
 };
 
 // ── PAGE: HOME ────────────────────────────────────────────────
@@ -484,6 +649,7 @@ function home() {
       ${card('📦', 'Versioning', 'URI, header, query param, and Accept header strategies.', 'versioning')}
       ${card('⚠️', 'Error Handling', 'RFC 7807 Problem Details — consistent, safe errors.', 'errors')}
       ${card('🔧', 'Common Problems', 'CORS, N+1 queries, idempotency, and other pitfalls.', 'common-problems')}
+      ${card('✏️', 'Write Operations', 'POST/PUT/PATCH/DELETE design, idempotency, and failure handling.', 'write-ops')}
     </div>
 
     <div class="card">
@@ -1994,6 +2160,357 @@ function commonProblemsPage() {
           <li>Document with OpenAPI / Swagger</li>
           <li>Provide a sandbox / test environment</li>
         </ul>
+      </div>
+    </div>`;
+}
+
+// ── PAGE: WRITE OPERATIONS ────────────────────────────────────
+function writeOpsPage() {
+  return `
+    <div class="page-title">✏️ Write Operations & Error Design</div>
+    <div class="page-sub">POST, PUT, PATCH, DELETE — architectural decisions, failure modes, and what clients should do.</div>
+
+    <div class="concept-box">
+      <strong>Core principle:</strong> The HTTP status code IS the error notification — clients must read and act on it.
+      Always return the updated resource in the body (200/201) so clients never need a follow-up GET to confirm success.
+      The key question is not "did it work?" but "is it safe to retry if I don't know?"
+    </div>
+
+    <div class="card">
+      <div class="card-title">Method Semantics at a Glance</div>
+      <table class="comparison-table">
+        <thead>
+          <tr><th>Method</th><th>Purpose</th><th>Idempotent?</th><th>Success code</th><th>Response body</th><th>Safe to retry on timeout?</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag tag-blue">POST</span></td>
+            <td>Create new resource</td><td>No</td><td>201 Created</td><td>Return the created resource</td><td>Only with Idempotency-Key</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-green">PUT</span></td>
+            <td>Full replace (all fields)</td><td>Yes</td><td>200 OK</td><td>Return the updated resource</td><td>Yes — same result every time</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-green">PATCH</span></td>
+            <td>Partial update (only sent fields)</td><td>Usually yes*</td><td>200 OK</td><td>Return the updated resource</td><td>Yes for "set", No for "increment"</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-red">DELETE</span></td>
+            <td>Remove resource</td><td>Yes</td><td>204 No Content</td><td>No body</td><td>Yes — 404 on retry means it already worked</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="text-muted text-sm" style="margin-top:8px">
+        * PATCH "set name to X" is idempotent. PATCH "add 10 to stock" is <em>not</em> — retrying doubles the increment.
+      </div>
+    </div>
+
+    <div class="demo-grid">
+
+      <div class="card">
+        <div class="card-title">POST — Create</div>
+        <div class="alert alert-info text-sm" style="margin-bottom:12px">
+          <strong>Not idempotent.</strong> Two identical POSTs create two resources (without an Idempotency-Key).
+          On success, the <code>Location</code> header and response body give you the new resource — no extra GET needed.
+        </div>
+        <div class="form-row">
+          <label class="form-label">Name</label>
+          <input class="form-input" id="wo-name" placeholder="e.g. Widget Pro" value="Widget Pro">
+        </div>
+        <div class="form-row">
+          <label class="form-label">Price</label>
+          <input class="form-input" id="wo-price" placeholder="e.g. 29.99" value="29.99">
+        </div>
+        <div class="form-row">
+          <label class="form-label">Category</label>
+          <select class="form-select" id="wo-category">
+            <option value="Electronics">Electronics</option>
+            <option value="Books">Books</option>
+            <option value="Clothing">Clothing</option>
+            <option value="Sports">Sports</option>
+            <option value="Kitchen">Kitchen</option>
+            <option value="Toys">Toys</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">Stock</label>
+          <input class="form-input" id="wo-stock" placeholder="e.g. 50" value="50">
+        </div>
+        <div class="btn-group" style="flex-direction:column;gap:8px;margin-top:12px">
+          <button class="btn btn-primary" data-action="woPost">POST valid data → 201 Created + Location</button>
+          <button class="btn btn-secondary" data-action="woPostInvalid">POST empty body → 422 Validation Failed</button>
+          <button class="btn btn-secondary" data-action="woPostDuplicate">POST duplicate "iPhone 15" → 409 Conflict</button>
+        </div>
+        <div class="concept-box text-sm" style="margin-top:14px">
+          <strong>422</strong> → Fix the request. Do not retry the same body.<br>
+          <strong>409</strong> → Already exists. GET it, or PUT to update it.<br>
+          <strong>201</strong> → ID auto-fills below so you can immediately PUT/PATCH/DELETE it.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">PUT / PATCH / DELETE — Modify</div>
+        <div class="alert alert-info text-sm" style="margin-bottom:12px">
+          <strong>All idempotent</strong> (for "set" operations). Safe to retry on timeout.
+          Response body (200) always contains the current state — no follow-up GET required.
+        </div>
+        <div class="form-row">
+          <label class="form-label">Product ID</label>
+          <input class="form-input" id="wo-id" placeholder="ID from POST above" style="font-weight:600">
+        </div>
+        <div class="concept-box text-sm" style="margin-bottom:10px">
+          <strong>PUT requires all fields</strong> (full replace). <strong>PATCH only sends what changes</strong> — leave name/price blank to skip them.
+        </div>
+        <div class="btn-group" style="flex-direction:column;gap:8px">
+          <button class="btn btn-primary" data-action="woPut">PUT (full replace) → 200 OK</button>
+          <button class="btn btn-secondary" data-action="woPutMissing">PUT to missing ID 99999 → 404 Not Found</button>
+          <button class="btn btn-primary" data-action="woPatch">PATCH (partial — only name/price) → 200 OK</button>
+          <button class="btn btn-danger" data-action="woDelete">DELETE → 204 No Content</button>
+          <button class="btn btn-secondary" data-action="woDeleteMissing">DELETE missing ID 99999 → 404 Not Found</button>
+        </div>
+        <div class="concept-box text-sm" style="margin-top:14px">
+          <strong>PUT timeout?</strong> Retry freely — same body = same result.<br>
+          <strong>PATCH "set" timeout?</strong> Retry freely.<br>
+          <strong>DELETE timeout?</strong> Retry — a 404 on retry means it already worked.<br>
+          <strong>After DELETE</strong> the ID field clears; POST again to create a new product.
+        </div>
+      </div>
+    </div>
+
+    <div class="http-exchange">
+      <div id="wo-request">${requestViewer(null)}</div>
+      <div id="wo-response">${responseViewer(null)}</div>
+    </div>
+
+    <div style="margin-top:32px">
+      <div class="card-title" style="font-size:1.1rem;margin-bottom:4px">POST Strategies: Insert vs Upsert vs Merge</div>
+      <div class="page-sub" style="margin-bottom:16px">Three different things POST can do — each with different trade-offs.</div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Strategy Comparison</div>
+        <table class="comparison-table">
+          <thead>
+            <tr><th>Strategy</th><th>If resource exists</th><th>If resource missing</th><th>Idempotent?</th><th>409 possible?</th><th>Best for</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>POST + Insert</strong><br><code style="font-size:11px">POST /api/products</code></td>
+              <td><span class="tag tag-red">409 Conflict</span> — fail loudly</td>
+              <td><span class="tag tag-green">201 Created</span></td>
+              <td>No — always needs Idempotency-Key</td><td>Yes</td>
+              <td>Strict create-only; audit trail; user-facing forms</td>
+            </tr>
+            <tr>
+              <td><strong>POST + Upsert</strong><br><code style="font-size:11px">POST /api/products/upsert</code></td>
+              <td><span class="tag tag-green">200 OK</span> — full replace</td>
+              <td><span class="tag tag-green">201 Created</span></td>
+              <td>Yes — safe to retry</td><td>No</td>
+              <td>Sync jobs; config management; bulk import</td>
+            </tr>
+            <tr>
+              <td><strong>POST + Merge</strong><br><code style="font-size:11px">POST /api/products/merge</code></td>
+              <td><span class="tag tag-green">200 OK</span> — patch in place</td>
+              <td><span class="tag tag-green">201 Created</span></td>
+              <td>Yes (for set ops)</td><td>No</td>
+              <td>Event-driven pipelines; partial ownership; incremental sync</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="text-muted text-sm" style="margin-top:8px">
+          All three use <strong>name</strong> as the natural key for upsert/merge (no ID needed). Insert uses server-assigned ID.
+        </div>
+      </div>
+
+      <div class="demo-grid">
+        <div class="card">
+          <div class="card-title">Upsert Demo</div>
+          <div class="concept-box text-sm" style="margin-bottom:12px">
+            <strong>Upsert = create or replace.</strong> The client doesn't need to know if the resource exists.
+            Same call, same body, always converges to the same state.<br><br>
+            <strong>Key trade-off:</strong> silently overwrites. No 409 means stale clients can overwrite newer data with no warning.
+          </div>
+          <div class="btn-group" style="flex-direction:column;gap:8px">
+            <button class="btn btn-primary" data-action="woUpsertExisting">Upsert "iPhone 15" (exists) → 200 full replace</button>
+            <button class="btn btn-primary" data-action="woUpsertNew">Upsert new unique name → 201 Created</button>
+          </div>
+          <div class="concept-box text-sm" style="margin-top:12px">
+            <strong>Advantages</strong>
+            <ul style="margin:6px 0 0 16px;line-height:1.8">
+              <li>Idempotent — retry on timeout is always safe</li>
+              <li>No client-side existence check needed</li>
+              <li>Natural for sync: "make the server match this state"</li>
+            </ul>
+            <strong style="margin-top:8px;display:block">Disadvantages</strong>
+            <ul style="margin:6px 0 0 16px;line-height:1.8">
+              <li>Silently overwrites — stale data can overwrite fresh data</li>
+              <li>No 409 signal — duplicate-name bugs go undetected</li>
+              <li>Audit trail blurred — can't distinguish first-create from re-sync</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Merge Demo</div>
+          <div class="concept-box text-sm" style="margin-bottom:12px">
+            <strong>Merge = create or patch.</strong> Only the fields you send are applied.
+            Omitted fields are untouched — each service can own a different subset of fields.<br><br>
+            <strong>Key trade-off:</strong> can't explicitly null a field. Omitting price means "leave it alone", not "set it to null".
+          </div>
+          <div class="btn-group" style="flex-direction:column;gap:8px">
+            <button class="btn btn-primary" data-action="woMergeExisting">Merge price+stock into "iPhone 15" → 200 (name/category unchanged)</button>
+            <button class="btn btn-primary" data-action="woMergeNew">Merge new product (all fields) → 201 Created</button>
+            <button class="btn btn-secondary" data-action="woMergeMissingRequired">Merge new product, missing price → 422</button>
+          </div>
+          <div class="concept-box text-sm" style="margin-top:12px">
+            <strong>Advantages</strong>
+            <ul style="margin:6px 0 0 16px;line-height:1.8">
+              <li>Services can own different fields without stepping on each other</li>
+              <li>Small payloads: only send what changed</li>
+              <li>Event-driven: each event is "apply this change"</li>
+            </ul>
+            <strong style="margin-top:8px;display:block">Disadvantages</strong>
+            <ul style="margin:6px 0 0 16px;line-height:1.8">
+              <li>Intentional null is impossible (omit = leave alone)</li>
+              <li>Dual-mode validation: required fields differ for create vs update</li>
+              <li>Field ownership conflicts still possible on shared fields</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="http-exchange" style="margin-top:16px">
+        <div id="strategy-request">${requestViewer(null)}</div>
+        <div id="strategy-response">${responseViewer(null)}</div>
+      </div>
+
+      <div class="demo-grid" style="margin-top:16px">
+        <div class="card">
+          <div class="card-title">When to Choose Insert (strict POST)</div>
+          <ul class="text-sm" style="margin:8px 0 0 16px;line-height:1.9">
+            <li>User submits a form — they expect to know if a duplicate exists</li>
+            <li>You need a clear create event for auditing / event sourcing</li>
+            <li>Duplicate names are a real bug that should surface as an error</li>
+            <li>Financial records, orders, invoices — accidental overwrites are dangerous</li>
+          </ul>
+          <div class="alert alert-error text-sm" style="margin-top:10px">
+            <strong>Use Idempotency-Key</strong> to make POST + Insert safe to retry. Without it, a network timeout can create duplicates.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">When to Choose Upsert</div>
+          <ul class="text-sm" style="margin:8px 0 0 16px;line-height:1.9">
+            <li>Sync / reconciliation job: "make the server match this snapshot"</li>
+            <li>Config management: "ensure this setting has this value"</li>
+            <li>Bulk operations: sending 1000 records, can't check each one first</li>
+            <li>The client always has the full current state it wants to apply</li>
+          </ul>
+          <div class="alert alert-info text-sm" style="margin-top:10px">
+            Consider adding <strong>a version field</strong> so the server can reject upserts older than the current data.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">When to Choose Merge</div>
+          <ul class="text-sm" style="margin:8px 0 0 16px;line-height:1.9">
+            <li>Multiple services co-own different fields on the same resource</li>
+            <li>Event-driven: each event applies one kind of change ("price updated")</li>
+            <li>Mobile / low-bandwidth: only send the delta, not the full resource</li>
+            <li>Progressive data collection: fill in fields as they become available</li>
+          </ul>
+          <div class="alert alert-info text-sm" style="margin-top:10px">
+            If you need to <strong>clear a field</strong> to null, merge can't do it. Use a full PUT or a dedicated "clear" endpoint.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Stale-Write Problem (All Three)</div>
+          <p class="text-sm">All write strategies share one vulnerability: a client with stale data can overwrite newer data.</p>
+          <table class="comparison-table" style="margin-top:10px">
+            <thead><tr><th>Strategy</th><th>Protection</th></tr></thead>
+            <tbody>
+              <tr><td>Insert</td><td>409 fires if it already exists — but gives no version info</td></tr>
+              <tr><td>Upsert</td><td>No protection — last writer wins unconditionally</td></tr>
+              <tr><td>Merge</td><td>No protection on shared fields — last writer wins</td></tr>
+            </tbody>
+          </table>
+          <p class="text-sm" style="margin-top:10px"><strong>Solution: optimistic locking.</strong> Add a <code>version</code> field. Client sends the version it last read; server rejects if version has moved on → <strong>409 Conflict</strong>.</p>
+          <pre class="concept-box text-sm" style="white-space:pre-wrap;margin-top:8px">POST /api/products/upsert
+{ "name": "iPhone 15", "price": 799.99, "version": 3 }
+
+→ current version still 3: apply + increment to 4
+→ current version is 4+: 409 Conflict ("version mismatch")</pre>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:32px">
+      <div class="card-title" style="font-size:1.1rem;margin-bottom:16px">Architectural Decision Guide</div>
+      <div class="demo-grid">
+        <div class="card">
+          <div class="card-title">When POST (Insert) Fails</div>
+          <table class="comparison-table">
+            <thead><tr><th>Status</th><th>Meaning</th><th>Client should</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag tag-red">422</span></td><td>Validation failed</td><td>Show <code>fieldErrors</code>. Fix and resubmit. Do not retry the same body.</td></tr>
+              <tr><td><span class="tag tag-red">409</span></td><td>Already exists</td><td>Decide: GET the existing resource? PUT to update it? Show "already exists" to user.</td></tr>
+              <tr><td><span class="tag tag-red">400</span></td><td>Malformed request</td><td>Fix the request structure (bad JSON, wrong Content-Type). Do not retry.</td></tr>
+              <tr><td><span class="tag tag-red">500</span></td><td>Server error</td><td>Retry with backoff. <strong>Risk:</strong> insert may have already succeeded — check for the resource first, or use an Idempotency-Key.</td></tr>
+              <tr><td><span class="tag tag-yellow">timeout</span></td><td>Outcome unknown</td><td>Do not blindly retry. GET first to see if the resource was created. If not, retry with an Idempotency-Key.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-title">When PUT / PATCH (Update) Fails</div>
+          <table class="comparison-table">
+            <thead><tr><th>Status</th><th>Meaning</th><th>Client should</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag tag-red">404</span></td><td>Resource deleted</td><td>Decide: re-create via POST? Show "no longer exists" to user?</td></tr>
+              <tr><td><span class="tag tag-red">409</span></td><td>Name conflict or optimistic lock mismatch</td><td>GET the fresh resource, re-apply changes, retry PUT with updated version/name.</td></tr>
+              <tr><td><span class="tag tag-red">422</span></td><td>Validation failed</td><td>Show <code>fieldErrors</code>. Fix and resubmit.</td></tr>
+              <tr><td><span class="tag tag-yellow">timeout (PUT)</span></td><td>Outcome unknown</td><td>Retry freely — PUT is idempotent. Same body produces same result.</td></tr>
+              <tr><td><span class="tag tag-yellow">timeout (PATCH "set")</span></td><td>Outcome unknown</td><td>Retry freely — "set" operations are idempotent.</td></tr>
+              <tr><td><span class="tag tag-yellow">timeout (PATCH "increment")</span></td><td>Outcome unknown</td><td>GET first. If the increment already applied, skip. Otherwise retry with an Idempotency-Key.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Idempotency Keys — Safe POST Retries</div>
+          <p class="text-sm">POST is the only method that can create duplicates on retry. An <strong>Idempotency-Key</strong> header solves this:</p>
+          <pre class="concept-box text-sm" style="white-space:pre-wrap;margin:10px 0">POST /api/products
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+
+{ "name": "Widget Pro", "price": 29.99 }</pre>
+          <p class="text-sm">The server:</p>
+          <ol class="text-sm" style="margin:8px 0 0 16px;line-height:1.8">
+            <li>Checks if this key was seen before</li>
+            <li>If yes → return the stored response (no DB write)</li>
+            <li>If no → execute normally, store result keyed by the UUID</li>
+          </ol>
+          <div class="alert alert-info text-sm" style="margin-top:10px">
+            <strong>Rule of thumb:</strong> Generate the UUID before the first attempt. Reuse it on every retry for the same operation until you get a definitive response.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Do I Need a GET After PUT/PATCH?</div>
+          <div class="alert alert-success text-sm">
+            <strong>No.</strong> If your API returns the full resource on 200, the response body IS the current state.
+          </div>
+          <table class="comparison-table" style="margin-top:12px">
+            <thead><tr><th>Pattern</th><th>Round trips</th><th>Verdict</th></tr></thead>
+            <tbody>
+              <tr><td>PUT → 200 (full body)</td><td>1</td><td><span class="tag tag-green">Best</span></td></tr>
+              <tr><td>PUT → 204 (no body) → GET</td><td>2</td><td><span class="tag tag-yellow">Avoid</span></td></tr>
+              <tr><td>PUT → 200 (empty {}) → GET</td><td>2</td><td><span class="tag tag-red">Wrong</span></td></tr>
+            </tbody>
+          </table>
+          <p class="text-sm" style="margin-top:12px"><strong>Exception:</strong> If the server applies side effects (computed fields, timestamps, version increments), always return the post-write state so clients see exactly what was stored.</p>
+        </div>
       </div>
     </div>`;
 }
