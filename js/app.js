@@ -1963,10 +1963,10 @@ function versioningPage() {
   const v2Body = { items: [{ id: 1, name: 'Widget', price: { amount: 9.99, currency: 'USD' }, availability: { inStock: true, quantity: 42 } }], version: 'v2' };
   return `
     <div class="page-title">📦 API Versioning</div>
-    <div class="page-sub">Four strategies for evolving APIs without breaking existing clients.</div>
+    <div class="page-sub">Strategies, tradeoffs, and hard decisions for evolving APIs without breaking existing clients.</div>
 
     <div class="concept-box">
-      When you change field names, types, or remove endpoints, existing clients break.<br>
+      When you change field names, types, or remove endpoints, existing clients break.
       Versioning lets you introduce breaking changes under a new version while old clients keep working.<br>
       <strong>Breaking change example:</strong> <code>price: 9.99</code> → <code>price: {"amount": 9.99, "currency": "USD"}</code>
     </div>
@@ -1976,7 +1976,7 @@ function versioningPage() {
         <div class="card-title"><span class="version-badge version-v1">V1</span> — Original shape</div>
         ${responseViewer({ status: 200, body: v1Body }, 'GET /api/v1/items')}
         ${simBlock(
-          'curl /api/v1/items\n# or: -H "X-API-Version: 1"\n# or: ?version=1\n# or: -H "Accept: application/vnd.demo.v1+json"',
+          'curl /api/v1/items',
           'GET', '/api/v1/items',
           { 'Accept': 'application/json' },
           null, 200,
@@ -1986,7 +1986,7 @@ function versioningPage() {
       <div class="card">
         <div class="card-title"><span class="version-badge version-v2">V2</span> — Breaking change: price is now an object</div>
         <div class="alert alert-warning text-sm">
-          V1 clients parsing <code>res.price * 1.1</code> would break on V2 — <code>price</code> is now an object, not a number.
+          V1 clients parsing <code>res.price * 1.1</code> break on V2 — <code>price</code> is now an object, not a number.
         </div>
         ${simBlock(
           'curl /api/v2/items',
@@ -1998,60 +1998,238 @@ function versioningPage() {
       </div>
     </div>
 
+    <div class="section-heading">Deprecation Headers — What V1 Responses Look Like in the Sunset Window</div>
+    ${curlBlock('# curl -v shows response headers alongside the body\nHTTP/2 200\nDeprecation: true\nSunset: Sat, 01 Jul 2026 00:00:00 GMT\nLink: </api/v2/items>; rel="successor-version"\nX-API-Version: v1\nContent-Type: application/json\n\n{"items": [{"id": 1, "name": "Widget", "price": 9.99, "inStock": true}]}')}
+
+    <div class="section-heading">Try It — 410 Gone (post-sunset endpoint)</div>
+    ${simBlock(
+      'curl /api/v0/items',
+      'GET', '/api/v0/items',
+      { 'Accept': 'application/json' },
+      null, 410,
+      { type: '/errors/gone', title: 'Gone', status: 410, detail: 'API v0 was retired on 2025-01-01. Migrate to /api/v2/items.', migrationGuide: 'https://docs.example.com/migration/v0-to-v2', sunset: '2025-01-01T00:00:00Z' }
+    )}
+
     <div class="card">
       <div class="card-title">Strategy Comparison</div>
       <table class="comparison-table">
-        <thead><tr><th>Strategy</th><th>Example</th><th>Pros</th><th>Cons</th></tr></thead>
+        <thead><tr><th>Strategy</th><th>Example</th><th>Pros</th><th>Cons</th><th>Used by</th></tr></thead>
         <tbody>
           <tr>
-            <td>URI Path</td>
+            <td><strong>URI Path</strong></td>
             <td><code>/api/v2/items</code></td>
-            <td><span class="pro">✓</span> Visible, cacheable, easy to test</td>
-            <td><span class="con">✗</span> Version in URL violates REST</td>
+            <td><span class="pro">✓</span> Visible, cacheable, easy to test and share</td>
+            <td><span class="con">✗</span> Version in URI violates REST resource semantics</td>
+            <td>Stripe, Twilio, Twitter</td>
           </tr>
           <tr>
-            <td>Query Param</td>
+            <td><strong>Query Param</strong></td>
             <td><code>?version=2</code></td>
             <td><span class="pro">✓</span> Backward-compatible default</td>
-            <td><span class="con">✗</span> Easy to forget, cache complications</td>
+            <td><span class="con">✗</span> Easy to omit; cache-key complications</td>
+            <td>Google (some APIs)</td>
           </tr>
           <tr>
-            <td>Request Header</td>
+            <td><strong>Request Header</strong></td>
             <td><code>X-API-Version: 2</code></td>
-            <td><span class="pro">✓</span> Clean URLs</td>
-            <td><span class="con">✗</span> Not visible in browser, hard to bookmark</td>
+            <td><span class="pro">✓</span> Clean URLs; version is metadata</td>
+            <td><span class="con">✗</span> Invisible in browser; must add to Vary header for caching</td>
+            <td>GitHub v3, Microsoft</td>
           </tr>
           <tr>
-            <td>Accept Header</td>
-            <td><code>application/vnd.demo.v2+json</code></td>
-            <td><span class="pro">✓</span> Most RESTful (content negotiation)</td>
-            <td><span class="con">✗</span> Complex, hard to test manually</td>
+            <td><strong>Accept Header</strong></td>
+            <td><code>application/vnd.co.v2+json</code></td>
+            <td><span class="pro">✓</span> Most RESTful; proper HTTP content negotiation</td>
+            <td><span class="con">✗</span> Complex; hard to type in browser or test manually</td>
+            <td>GitHub (media type)</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="text-sm text-muted" style="margin-top:8px">
+        <strong>In practice:</strong> URI path wins on discoverability and simplicity for the vast majority of APIs. Use Accept header versioning only if REST purity is a hard requirement or you are GitHub.
+      </div>
+    </div>
+
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title">Non-Breaking Changes (no new version needed)</div>
+        <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
+          <li>Adding a new optional response field</li>
+          <li>Adding a new endpoint</li>
+          <li>Adding a new optional query parameter</li>
+          <li>Making a required request field optional</li>
+          <li>Adding a new enum value <em>(see caveat below)</em></li>
+          <li>Increasing rate limits or quotas</li>
+          <li>Improving response time or error messages</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title">Breaking Changes (require a new version)</div>
+        <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
+          <li>Renaming or removing a response field</li>
+          <li>Changing a field's type (<code>number</code> → <code>object</code>)</li>
+          <li>Removing an endpoint or HTTP method</li>
+          <li>Making an optional field required</li>
+          <li>Changing the authentication scheme</li>
+          <li>Changing the error response format</li>
+          <li>A bug fix that changes behavior clients rely on</li>
+          <li>Narrowing accepted enum or input values</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="concept-box">
+      <strong>Enum caveat:</strong> Adding a new enum value looks additive, but clients that use an exhaustive <code>switch/match</code> (e.g. <code>default: throw("unknown status")</code>) will break when they encounter it. Treat new enum values as potentially breaking and call them out explicitly in release notes. Document an <code>UNKNOWN</code> catch-all convention to future-proof client code.
+    </div>
+
+    <div class="card">
+      <div class="card-title">The Hard Question: What If the Change Only Affects Some Users?</div>
+      <div class="text-sm" style="margin-bottom:10px">
+        A change breaks 20% of callers; 80% still work fine on the old behavior. Do you version? Do you force migration? The answer depends entirely on <em>who</em> those users are — not how many.
+      </div>
+      <table class="comparison-table">
+        <thead><tr><th>Who Is Still on Legacy?</th><th>Recommended Approach</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>B2B / partner clients</strong></td>
+            <td>Version it. 6–12 month sunset window. Contact holdouts individually near the deadline.</td>
+            <td>Partners have production integrations you cannot touch. You cannot deploy a change on their behalf overnight.</td>
+          </tr>
+          <tr>
+            <td><strong>Mobile app users (old versions)</strong></td>
+            <td>Version it, possibly indefinitely. Old app store versions persist for years.</td>
+            <td>You cannot force an app update. App store enforcement is slow. Breaking old clients causes crashes in the wild with no recovery path.</td>
+          </tr>
+          <tr>
+            <td><strong>Internal services you own</strong></td>
+            <td>Coordinated deploy — no versioning needed. Migrate caller and service together.</td>
+            <td>You control both sides. Adding a version number to internal APIs adds overhead with little benefit.</td>
+          </tr>
+          <tr>
+            <td><strong>Public third-party developers</strong></td>
+            <td>Version it. Minimum 6 months notice with migration guide and code samples.</td>
+            <td>Unknown count of callers. You cannot enumerate them. Some will be slow to migrate even with ample notice.</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div class="card">
-      <div class="card-title">Non-Breaking vs Breaking Changes</div>
+      <div class="card-title">When to Force Migration vs. Keep Legacy Alive</div>
+      <table class="comparison-table">
+        <thead><tr><th>Reason for Change</th><th>Force?</th><th>Timeline</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Security vulnerability in old version</strong></td><td class="pro">Yes — immediately</td><td>Communicate now; give days to weeks, not months</td></tr>
+          <tr><td><strong>GDPR / legal compliance requirement</strong></td><td class="pro">Yes — legal deadline</td><td>As short as technically feasible; legal deadline is hard</td></tr>
+          <tr><td><strong>Infrastructure cost reduction</strong></td><td class="pro">Yes — by sunset date</td><td>Standard 6–12 months; announce early</td></tr>
+          <tr><td><strong>Performance or reliability improvement</strong></td><td class="con">No</td><td>Encourage opt-in via migration guide; never force pure improvements</td></tr>
+          <tr><td><strong>Developer experience improvement</strong></td><td class="con">No</td><td>Keep old version; new clients adopt naturally over time</td></tr>
+          <tr><td><strong>Bug fix changing relied-upon behavior</strong></td><td>Version it</td><td>Check adoption data; coordinate with known callers first</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">The Sunset Lifecycle (Step by Step)</div>
+      <ol class="text-sm" style="padding-left:20px;line-height:2.2">
+        <li><strong>Release v2 alongside v1</strong> — never remove v1 the same day v2 ships</li>
+        <li><strong>Add deprecation headers immediately</strong> to every v1 response: <code>Deprecation: true</code>, <code>Sunset: &lt;date&gt;</code>, <code>Link: rel="successor-version"</code></li>
+        <li><strong>Publish migration guide</strong> — changelog, developer portal, email; include working code examples for the new version</li>
+        <li><strong>60-day countdown</strong> — email all clients still calling v1 (use version tracking logs to find them)</li>
+        <li><strong>30-day countdown</strong> — email again; escalate to account manager for enterprise clients; offer live migration office hours</li>
+        <li><strong>Sunset date</strong> — return <code>410 Gone</code> with migration link in body; never <code>404</code> (hides the reason)</li>
+        <li><strong>Post-sunset monitoring</strong> — watch for clients still hitting the retired endpoint; they need follow-up support, not just a 410</li>
+      </ol>
+      <div class="text-sm text-muted" style="margin-top:8px">
+        Minimum: <strong>6 months</strong> for external APIs. <strong>12 months</strong> for enterprise B2B partners.
+        Security/legal exceptions may shorten this — always communicate why and offer direct migration support.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Monitor Version Usage Before You Sunset</div>
+      <div class="text-sm" style="line-height:1.9;margin-bottom:10px">Never sunset blind. Before removing any version you must know who is still calling it — and that they have migrated.</div>
       <div class="demo-grid">
         <div>
-          <div class="text-sm" style="font-weight:600;color:var(--success);margin-bottom:6px">✓ Non-Breaking (additive)</div>
+          <div class="text-sm" style="font-weight:600;margin-bottom:4px">Track per request:</div>
           <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
-            <li>Adding a new optional field</li>
-            <li>Adding a new endpoint</li>
-            <li>Adding a new enum value</li>
-            <li>Making a required field optional</li>
+            <li>API version called (v1, v2)</li>
+            <li>Partner or client identifier</li>
+            <li>Timestamp of most recent call</li>
+            <li>Endpoint and HTTP method</li>
           </ul>
         </div>
         <div>
-          <div class="text-sm" style="font-weight:600;color:var(--error);margin-bottom:6px">✗ Breaking (requires new version)</div>
+          <div class="text-sm" style="font-weight:600;margin-bottom:4px">Dashboard signals:</div>
           <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
-            <li>Renaming or removing a field</li>
-            <li>Changing a field's type</li>
-            <li>Removing an endpoint</li>
-            <li>Making an optional field required</li>
+            <li><strong>Active v1 callers</strong> — distinct client IDs in last 30 days</li>
+            <li><strong>V1 call share</strong> — v1 % of total traffic; watch for natural decline</li>
+            <li><strong>Holdout list</strong> — clients still on v1 within 30 days of Sunset</li>
           </ul>
         </div>
+      </div>
+      <div class="text-sm text-muted" style="margin-top:8px">
+        Zero v1 traffic for 60 consecutive days → high confidence to sunset. Any active partner → contact them before pulling the plug.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Version Coexistence Cost</div>
+      <div class="text-sm" style="margin-bottom:8px">Every live version multiplies your maintenance surface. Before accepting a new version, understand the full cost:</div>
+      <table class="comparison-table">
+        <thead><tr><th>Cost</th><th>What It Means in Practice</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Duplicated business logic</strong></td><td>Bug fixes must be applied to every live version — or accepted as intentional version divergence</td></tr>
+          <tr><td><strong>Test multiplication</strong></td><td>N versions = N integration test suites; flakiness and coverage gaps compound</td></tr>
+          <tr><td><strong>Documentation debt</strong></td><td>Every doc page must describe behavior across all supported versions</td></tr>
+          <tr><td><strong>Infrastructure lock-in</strong></td><td>Old versions may pin old runtimes, frameworks, or services you'd otherwise retire</td></tr>
+          <tr><td><strong>Security exposure</strong></td><td>Old versions may lack security hardening added later; each version is a separate attack surface</td></tr>
+        </tbody>
+      </table>
+      <div class="text-sm text-muted" style="margin-top:8px">
+        <strong>Rule of thumb:</strong> Support at most 2 major versions simultaneously. When v3 ships, v1 must have a firm Sunset date scheduled.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Hard Questions &amp; Answers</div>
+      <div class="text-sm" style="line-height:1.9">
+
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <strong>Q: A bug fix changes behavior that some clients depend on. Is that a breaking change?</strong><br>
+          <strong>A:</strong> Yes. If clients rely on the buggy behavior as a feature, it is a behavioral breaking change regardless of intent. Version it — keep the old behavior in v1, ship the fix in v2. Communicate clearly what the correct behavior is and why the old behavior was wrong.
+        </div>
+
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <strong>Q: We must remove a field for GDPR compliance. Must we give the full 6-month notice?</strong><br>
+          <strong>A:</strong> No. Legal and security requirements override the standard deprecation window. Communicate immediately, explain the legal obligation, and give the shortest timeline that is technically feasible for callers to migrate — typically 30–90 days. Offer direct migration support to all known callers.
+        </div>
+
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <strong>Q: Only 5 partners still use V1. Can we just sunset it?</strong><br>
+          <strong>A:</strong> Only after individually notifying those 5 partners, getting their acknowledgment of the deadline, and confirming at least some have already migrated. Never sunset on low traffic alone — "low traffic" may be a partner's nightly batch job that runs once at 3am and would be silently broken by a 410.
+        </div>
+
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <strong>Q: Should every microservice version independently?</strong><br>
+          <strong>A:</strong> Yes. Service A at v2 and service B at v3 is completely normal. An API gateway can present a unified versioned surface to external clients while services evolve independently. Trying to keep all services on the same version number creates false coupling and slows every team to the pace of the slowest service.
+        </div>
+
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <strong>Q: Can I add required fields in v2 without affecting v1 clients?</strong><br>
+          <strong>A:</strong> Yes. V1 and V2 are separate code paths. V2 can have fields — including required ones — that did not exist in V1. V1 clients call <code>/v1/</code> and never encounter the v2 schema.
+        </div>
+
+        <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+          <strong>Q: A new enum value is non-breaking, right?</strong><br>
+          <strong>A:</strong> Not always. Clients using exhaustive switch/match (e.g. <code>default: throw("unknown")</code>) break when they encounter an unrecognized value. Flag new enum values in release notes. Recommend clients always implement a safe default branch to handle future values.
+        </div>
+
+        <div>
+          <strong>Q: The change breaks 10% of users. Do I have to version it for the other 90%?</strong><br>
+          <strong>A:</strong> The percentage is the wrong metric. The question is <em>who</em> the 10% are. B2B partners with production integrations → version and coordinate with them individually. Internal services → coordinated deploy, no versioning. Mobile app users → you cannot force an update; version or use feature flags. Unknown public developers → version, because you cannot contact them.
+        </div>
+
       </div>
     </div>`;
 }
