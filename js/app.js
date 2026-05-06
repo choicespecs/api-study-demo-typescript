@@ -1578,10 +1578,10 @@ function partnerApiPage() {
       </table>
     </div>
 
-    <div class="alert alert-warning">
-      <strong>⚠ API Keys Alone Are Not Enough</strong><br>
-      An API key in a header proves the caller <em>knows the key</em> — it does not prove the request was not tampered with, is not a replay, or came from an authorized source. Real B2B integrations layer multiple mechanisms on top of the API key.
-      <table class="comparison-table" style="margin-top:10px">
+    <div class="card">
+      <div class="card-title">Why API Keys Alone Are Not Enough</div>
+      <div class="text-sm" style="margin-bottom:10px">An API key in a header proves the caller <em>knows the key</em> — it does not prove the request was not tampered with, is not a replay, or came from an authorized source. Real B2B integrations layer multiple mechanisms on top of the API key.</div>
+      <table class="comparison-table">
         <thead><tr><th>Risk</th><th>What Happens</th><th>Mitigation</th></tr></thead>
         <tbody>
           <tr><td><strong>Key leakage</strong></td><td>Partner embeds key in source code or CI/CD logs — compromised without a breach of your system</td><td>HMAC signing: knowing the key alone is not enough without the signing secret</td></tr>
@@ -1635,38 +1635,38 @@ function partnerApiPage() {
       </div>
     </div>
 
-    <div class="section-heading">Try It — PREMIUM Partner Auth Info</div>
+    <div class="section-heading">Try It — PREMIUM Partner: Auth Info (signed request)</div>
     ${simBlock(
-      'curl /api/partner/auth-info \\\n  -H "X-Partner-Key: partner-alpha-key-12345"',
+      'curl /api/partner/auth-info \\\n  -H "X-Partner-Key: partner-alpha-key-12345" \\\n  -H "X-Timestamp: 1704067200" \\\n  -H "X-Signature: sha256=e3d1f9a2b8c4d7e6..."',
       'GET', '/api/partner/auth-info',
-      { 'X-Partner-Key': 'partner-alpha-key-12345' },
+      { 'X-Partner-Key': 'partner-alpha-key-12345', 'X-Timestamp': '1704067200', 'X-Signature': 'sha256=e3d1f9a2b8c4d7e6f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4' },
       null, 200,
       { partnerId: 'alpha-corp', organizationName: 'Alpha Corp', tier: 'PREMIUM', scopes: ['catalog:read', 'orders:read', 'orders:write', 'catalog:write', 'analytics:read'], rateLimit: 10000 }
     )}
 
-    <div class="section-heading">Try It — FREE Partner Auth Info (fewer scopes)</div>
+    <div class="section-heading">Try It — FREE Partner: Auth Info (fewer scopes)</div>
     ${simBlock(
-      'curl /api/partner/auth-info \\\n  -H "X-Partner-Key: partner-gamma-key-12345"',
+      'curl /api/partner/auth-info \\\n  -H "X-Partner-Key: partner-gamma-key-12345" \\\n  -H "X-Timestamp: 1704067200" \\\n  -H "X-Signature: sha256=c1a2f3b4e5d6c7b8..."',
       'GET', '/api/partner/auth-info',
-      { 'X-Partner-Key': 'partner-gamma-key-12345' },
+      { 'X-Partner-Key': 'partner-gamma-key-12345', 'X-Timestamp': '1704067200', 'X-Signature': 'sha256=c1a2f3b4e5d6c7b8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2' },
       null, 200,
       { partnerId: 'gamma-corp', organizationName: 'Gamma Corp', tier: 'FREE', scopes: ['catalog:read'], rateLimit: 100 }
     )}
 
-    <div class="section-heading">Try It — Audit Log: PREMIUM (200 OK)</div>
+    <div class="section-heading">Try It — Audit Log: PREMIUM (200 OK, signed request)</div>
     ${simBlock(
-      'curl /api/partner/audit \\\n  -H "X-Partner-Key: partner-alpha-key-12345"',
+      'curl /api/partner/audit \\\n  -H "X-Partner-Key: partner-alpha-key-12345" \\\n  -H "X-Timestamp: 1704067200" \\\n  -H "X-Signature: sha256=f4a1d8c3b2e7f9a0..."',
       'GET', '/api/partner/audit',
-      { 'X-Partner-Key': 'partner-alpha-key-12345' },
+      { 'X-Partner-Key': 'partner-alpha-key-12345', 'X-Timestamp': '1704067200', 'X-Signature': 'sha256=f4a1d8c3b2e7f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4' },
       null, 200,
       { events: [{ id: 'evt_001', action: 'catalog.read', timestamp: '2024-01-01T10:00:00Z' }, { id: 'evt_002', action: 'orders.write', timestamp: '2024-01-01T10:01:00Z' }], total: 2 }
     )}
 
     <div class="section-heading">Try It — Audit Log: FREE Partner (403 Insufficient Scope)</div>
     ${simBlock(
-      'curl /api/partner/audit \\\n  -H "X-Partner-Key: partner-gamma-key-12345"',
+      'curl /api/partner/audit \\\n  -H "X-Partner-Key: partner-gamma-key-12345" \\\n  -H "X-Timestamp: 1704067200" \\\n  -H "X-Signature: sha256=b2c3d4e5f6a7b8c9..."',
       'GET', '/api/partner/audit',
-      { 'X-Partner-Key': 'partner-gamma-key-12345' },
+      { 'X-Partner-Key': 'partner-gamma-key-12345', 'X-Timestamp': '1704067200', 'X-Signature': 'sha256=b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3' },
       null, 403,
       { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'Insufficient scope — analytics:read required', requiredScope: 'analytics:read', partnerTier: 'FREE' }
     )}
