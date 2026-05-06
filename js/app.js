@@ -1578,9 +1578,23 @@ function partnerApiPage() {
       </table>
     </div>
 
+    <div class="alert alert-warning">
+      <strong>⚠ API Keys Alone Are Not Enough</strong><br>
+      An API key in a header proves the caller <em>knows the key</em> — it does not prove the request was not tampered with, is not a replay, or came from an authorized source. Real B2B integrations layer multiple mechanisms on top of the API key.
+      <table class="comparison-table" style="margin-top:10px">
+        <thead><tr><th>Risk</th><th>What Happens</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Key leakage</strong></td><td>Partner embeds key in source code or CI/CD logs — compromised without a breach of your system</td><td>HMAC signing: knowing the key alone is not enough without the signing secret</td></tr>
+          <tr><td><strong>Replay attack</strong></td><td>Attacker captures a valid request and resends it unchanged — the API key is still valid</td><td>HMAC + timestamp: server rejects any request older than 5 minutes</td></tr>
+          <tr><td><strong>Body tampering</strong></td><td>Body is modified in transit; the key header is preserved — the API key covers identity, not payload integrity</td><td>HMAC signs the full request body — any modification invalidates the signature</td></tr>
+          <tr><td><strong>Impersonation</strong></td><td>Any client that learns the key can call your API — the key proves knowledge of a secret, not caller identity</td><td>mTLS: client must present a certificate at the TLS handshake level</td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="demo-grid">
       <div class="card">
-        <div class="card-title">Partner Tiers & Scopes</div>
+        <div class="card-title">Partner Tiers &amp; Scopes</div>
         <table class="cred-table">
           <thead><tr><th>Partner</th><th>Tier</th><th>Rate Limit</th><th>Scopes</th></tr></thead>
           <tbody>
@@ -1657,34 +1671,178 @@ function partnerApiPage() {
       { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'Insufficient scope — analytics:read required', requiredScope: 'analytics:read', partnerTier: 'FREE' }
     )}
 
+    <div class="divider"></div>
+    <div class="section-heading">HMAC Request Signing</div>
+
+    <div class="card">
+      <div class="card-title">How It Works</div>
+      <div class="text-sm" style="line-height:1.9">
+        Partners sign every inbound request with <strong>HMAC-SHA256</strong> using a shared signing secret (separate from the API key itself). The server recomputes the signature independently and rejects any mismatch — without the secret, the signature cannot be forged.<br><br>
+        <strong>Canonical string that gets signed:</strong><br>
+        <code>METHOD + "\\n" + PATH + "\\n" + TIMESTAMP + "\\n" + SHA256(body)</code><br><br>
+        <strong>Why include a timestamp?</strong> Limits the replay window to 5 minutes. Even if an attacker captures a valid signed request, it becomes useless after 300 seconds — the server rejects <code>|now &minus; timestamp| &gt; 300</code>.<br><br>
+        <strong>Why include the body hash?</strong> Any modification to the request body changes its SHA-256 hash, which changes the HMAC output. A man-in-the-middle cannot tamper with the body without also regenerating the HMAC — which requires the secret.
+      </div>
+    </div>
+
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title">Client: Generating the Signature (Java)</div>
+        ${curlBlock('// Before sending each signed request:\nInstant now = Instant.now();\nString rawBody = requestBodyJson; // raw JSON, before any parsing\nString bodyHash = sha256Hex(rawBody);\nString canonical = "POST\\n/api/partner/orders\\n"\n    + now.getEpochSecond() + "\\n" + bodyHash;\nString signature = "sha256=" + hmacSha256(signingSecret, canonical);\n\nHttpRequest.newBuilder()\n    .header("X-Partner-Key", partnerKey)\n    .header("X-Timestamp", String.valueOf(now.getEpochSecond()))\n    .header("X-Signature", signature)\n    .header("Content-Type", "application/json")\n    .POST(BodyPublishers.ofString(rawBody))\n    .build();')}
+      </div>
+      <div class="card">
+        <div class="card-title">Server: Verifying the Signature (Java)</div>
+        ${curlBlock('// 1. Reject stale requests — replay protection\nlong now = Instant.now().getEpochSecond();\nif (Math.abs(now - timestamp) > 300) {\n    return ResponseEntity.status(401)\n        .body(Map.of("error", "Request expired"));\n}\n// 2. Recompute expected signature\nString bodyHash = sha256Hex(rawBody);\nString canonical = method + "\\n" + path + "\\n"\n    + timestamp + "\\n" + bodyHash;\nString expected = "sha256=" + hmacSha256(\n    partner.getSigningSecret(), canonical);\n// 3. Constant-time compare — never String.equals()\n//    String.equals() is vulnerable to timing attacks\nif (!MessageDigest.isEqual(\n        expected.getBytes(), incoming.getBytes())) {\n    return ResponseEntity.status(401)\n        .body(Map.of("error", "Invalid signature"));\n}')}
+      </div>
+    </div>
+
+    <div class="section-heading">Try It — Valid HMAC-Signed Request (201 Created)</div>
+    ${simBlock(
+      'curl -X POST /api/partner/orders \\\n  -H "X-Partner-Key: partner-alpha-key-12345" \\\n  -H "X-Timestamp: 1704067200" \\\n  -H "X-Signature: sha256=a7f3d2b1c9e4f8a2..." \\\n  -H "Content-Type: application/json" \\\n  -d \'{"orderId":"ord-001","amount":99.99}\'',
+      'POST', '/api/partner/orders',
+      { 'X-Partner-Key': 'partner-alpha-key-12345', 'X-Timestamp': '1704067200', 'X-Signature': 'sha256=a7f3d2b1c9e4f8a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6' },
+      { orderId: 'ord-001', amount: 99.99 },
+      201,
+      { orderId: 'ord-001', status: 'created', partnerId: 'alpha-corp', signatureVerified: true }
+    )}
+
+    <div class="section-heading">Try It — Tampered Body: Signature Mismatch (401)</div>
+    ${simBlock(
+      'curl -X POST /api/partner/orders \\\n  -H "X-Partner-Key: partner-alpha-key-12345" \\\n  -H "X-Timestamp: 1704067200" \\\n  -H "X-Signature: sha256=a7f3d2b1c9e4f8a2..." \\\n  -d \'{"orderId":"ord-001","amount":9999.99}\'',
+      'POST', '/api/partner/orders',
+      { 'X-Partner-Key': 'partner-alpha-key-12345', 'X-Timestamp': '1704067200', 'X-Signature': 'sha256=a7f3d2b1c9e4f8a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6' },
+      { orderId: 'ord-001', amount: 9999.99 },
+      401,
+      { type: '/errors/unauthorized', title: 'Unauthorized', status: 401, detail: 'Signature verification failed — request body may have been tampered with' }
+    )}
+
+    <div class="section-heading">Try It — Replay Attack: Stale Timestamp (401)</div>
+    ${simBlock(
+      'curl -X POST /api/partner/orders \\\n  -H "X-Partner-Key: partner-alpha-key-12345" \\\n  -H "X-Timestamp: 1609459200" \\\n  -H "X-Signature: sha256=valid-but-old..." \\\n  -d \'{"orderId":"ord-001","amount":99.99}\'',
+      'POST', '/api/partner/orders',
+      { 'X-Partner-Key': 'partner-alpha-key-12345', 'X-Timestamp': '1609459200', 'X-Signature': 'sha256=valid-but-old1234567890abcdef1234567890abcdef12345678' },
+      { orderId: 'ord-001', amount: 99.99 },
+      401,
+      { type: '/errors/unauthorized', title: 'Unauthorized', status: 401, detail: 'Request expired — timestamp is outside the 5-minute replay window', serverTime: 1704067200, requestTime: 1609459200, deltaSeconds: 94608000 }
+    )}
+
+    <div class="divider"></div>
+    <div class="section-heading">Mutual TLS (mTLS)</div>
+
+    <div class="card">
+      <div class="card-title">Standard TLS vs Mutual TLS</div>
+      <table class="comparison-table">
+        <thead><tr><th></th><th>Standard TLS</th><th>Mutual TLS (mTLS)</th></tr></thead>
+        <tbody>
+          <tr><td>Server presents certificate</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Client presents certificate</td><td>✗</td><td>✓ — signed by your CA</td></tr>
+          <tr><td>Authentication enforced at</td><td>TLS handshake (server only)</td><td>TLS handshake — before your application code runs</td></tr>
+          <tr><td>What it stops</td><td>Eavesdropping</td><td>Eavesdropping + unauthorized connections</td></tr>
+          <tr><td>Revocation</td><td>N/A</td><td>CRL / OCSP — immediate, no code deploy needed</td></tr>
+          <tr><td>Onboarding cost</td><td>None</td><td>Certificate issuance + lifecycle management</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title">How mTLS Works</div>
+        <div class="text-sm" style="line-height:2">
+          <strong>Onboarding:</strong><br>
+          1. You issue a client certificate signed by your internal CA (or sign a CSR the partner generates)<br>
+          2. Partner configures their HTTP client to present the cert on every outbound request<br>
+          3. Your API gateway rejects connections without a valid cert at the TLS layer — before a single HTTP byte is read<br>
+          4. Gateway injects <code>X-Client-Cert-DN</code> (Distinguished Name) into the upstream request<br>
+          5. Your application maps the DN to a partner identity — no client self-reporting is trusted<br><br>
+          <strong>Revocation:</strong> Revoke the cert via CRL/OCSP — takes effect immediately across all load balancer nodes with no code deploy.
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Gateway + Spring Configuration</div>
+        ${curlBlock('# nginx: enforce client cert at TLS layer, inject DN\nssl_client_certificate /etc/ssl/partner-ca.crt;\nssl_verify_client       on;\nproxy_set_header X-Client-Cert-DN $ssl_client_s_dn;\n\n// Spring: read the DN injected by the gateway\n// Never trust a client-supplied X-Client-Cert-DN header\n@GetMapping("/orders")\npublic ResponseEntity getOrders(\n    @RequestHeader("X-Client-Cert-DN") String certDn) {\n  // certDn example: "CN=alpha-corp,O=Alpha Corp,C=US"\n  Partner p = partnerService.resolveByDn(certDn);\n  return ResponseEntity.ok(partnerService.getOrders(p));\n}')}
+      </div>
+    </div>
+
+    <div class="concept-box">
+      <strong>Use mTLS when:</strong> partners are enterprises with dedicated IT teams who can manage certificate rotation, compliance requirements mandate cryptographic proof of client identity (PCI-DSS, HIPAA), or you need defense-in-depth against stolen API keys.<br>
+      <strong>Skip mTLS when:</strong> partners are small teams who cannot manage cert lifecycle, or when HMAC request signing already satisfies your threat model. mTLS adds real onboarding friction.
+    </div>
+
+    <div class="divider"></div>
+    <div class="section-heading">IP Allowlisting</div>
+
+    <div class="card">
+      <div class="card-title">Network-Level Restriction</div>
+      <div class="text-sm" style="line-height:1.9">
+        Partners register their egress IP ranges at onboarding. Requests from non-allowlisted IPs are rejected at the load balancer — before reaching your application code.<br><br>
+        <strong>Rules:</strong>
+        <ul style="padding-left:18px;line-height:2">
+          <li>Reject at the <strong>load balancer / API gateway</strong>, not in application code — reduces attack surface and avoids wasting compute on unauthorized traffic</li>
+          <li>Require partners to use <strong>static egress IPs</strong> (NAT gateway), not developer workstation IPs that change daily</li>
+          <li>Treat IP range updates as a <strong>change request</strong>: partner contacts you, you approve and update — never self-service</li>
+          <li>Combine with API key + HMAC: a stolen key from an unregistered IP returns <code>403</code> before authentication is even attempted</li>
+          <li><strong>Limitation:</strong> does not protect against an attacker who has compromised a server inside the partner's allowlisted range</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="section-heading">Defense in Depth — Layered Security</div>
+
+    <div class="card">
+      <div class="card-title">No Single Layer Is Sufficient</div>
+      <table class="comparison-table">
+        <thead><tr><th>Layer</th><th>Mechanism</th><th>What It Prevents</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Network</strong></td><td>IP allowlisting at load balancer</td><td>Connections from unknown sources</td></tr>
+          <tr><td><strong>Transport</strong></td><td>TLS 1.3 + mTLS client certificate</td><td>Eavesdropping, unauthorized TLS connections</td></tr>
+          <tr><td><strong>Request integrity</strong></td><td>HMAC signing + 5-min timestamp window</td><td>Replay attacks, request body tampering</td></tr>
+          <tr><td><strong>Identity</strong></td><td>Partner API key (HMAC-SHA256 hashed in DB)</td><td>Unauthorized API access</td></tr>
+          <tr><td><strong>Authorization</strong></td><td>Scopes + tenant isolation per partner</td><td>Cross-partner data leakage, privilege escalation</td></tr>
+          <tr><td><strong>Audit</strong></td><td>Immutable append-only logs</td><td>Undetected misuse, compliance gaps</td></tr>
+        </tbody>
+      </table>
+      <div class="text-sm text-muted" style="margin-top:10px">
+        <strong>Minimum viable B2B security:</strong> TLS + API key + HMAC request signing + audit logs.<br>
+        <strong>Full enterprise security:</strong> all of the above + mTLS + IP allowlisting.
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-title">Partner Onboarding Checklist</div>
       <div class="triple-grid" style="gap:12px">
         <div>
-          <div class="text-sm" style="font-weight:600;margin-bottom:6px">Authentication</div>
+          <div class="text-sm" style="font-weight:600;margin-bottom:6px">Authentication &amp; Signing</div>
           <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
             <li>Issue per-partner API keys (not shared)</li>
             <li>Hash keys in DB — never store plaintext</li>
             <li>Support 2 active keys per partner (rotation)</li>
-            <li>Alert ops on sustained 401s from a partner</li>
+            <li>Issue a separate HMAC signing secret per partner</li>
+            <li>Enforce 5-minute timestamp window on signed requests</li>
+            <li>Use constant-time comparison for signature verification</li>
+            <li>Alert ops on sustained 401s from any partner</li>
           </ul>
         </div>
         <div>
-          <div class="text-sm" style="font-weight:600;margin-bottom:6px">Data &amp; Access</div>
+          <div class="text-sm" style="font-weight:600;margin-bottom:6px">Transport &amp; Network</div>
           <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
-            <li>Enforce tenant isolation on every query</li>
+            <li>Enforce TLS 1.2+ on all endpoints (prefer 1.3)</li>
+            <li>mTLS for high-compliance partners (HIPAA, PCI-DSS)</li>
+            <li>Collect partner egress IP ranges at onboarding</li>
+            <li>Enforce IP allowlist at the load balancer layer</li>
+            <li>Treat IP range updates as approved change requests</li>
+          </ul>
+        </div>
+        <div>
+          <div class="text-sm" style="font-weight:600;margin-bottom:6px">Data, Contracts &amp; Reliability</div>
+          <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
+            <li>Enforce tenant isolation on every DB query</li>
             <li>Assign scopes at provisioning, not per-request</li>
-            <li>Provide a sandbox with test data</li>
-            <li>Separate prod and sandbox keys</li>
-          </ul>
-        </div>
-        <div>
-          <div class="text-sm" style="font-weight:600;margin-bottom:6px">Contracts &amp; Reliability</div>
-          <ul class="text-sm text-muted" style="padding-left:18px;line-height:2">
+            <li>Provide a sandbox with separate keys and test data</li>
             <li>Deprecation header on every old-version response</li>
             <li>Sunset date ≥ 6 months out (12 for enterprise)</li>
             <li>Sign outbound webhooks with per-partner secret</li>
-            <li>Retry delivery with exponential backoff</li>
+            <li>Retry webhook delivery with exponential backoff</li>
           </ul>
         </div>
       </div>
