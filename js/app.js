@@ -1123,6 +1123,232 @@ function rbacPage() {
       { Authorization: 'Bearer eyJhbGci... (admin token — roles: [ROLE_ADMIN, ROLE_USER])' },
       null, 200,
       { message: 'Admin endpoint — ADMIN role required', user: 'admin', roles: ['ROLE_ADMIN', 'ROLE_USER'] }
+    )}
+
+    <div class="divider"></div>
+    <div class="section-heading" style="font-size:18px">Access Control Models Beyond RBAC</div>
+    <div class="alert alert-info text-sm">RBAC is the most common starting point, but five other models handle cases where roles alone are not expressive enough.</div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Model Comparison at a Glance</div>
+      <table class="comparison-table">
+        <thead><tr><th>Model</th><th>Access granted by</th><th>Best fit</th><th>Real-world examples</th><th>Complexity</th></tr></thead>
+        <tbody>
+          <tr><td><strong>RBAC</strong></td><td>User's assigned role</td><td>Most apps, clear job functions</td><td>Admin panel, CMS, SaaS tiers</td><td>Low</td></tr>
+          <tr><td><strong>ABAC</strong></td><td>Attributes of user, resource &amp; environment</td><td>Fine-grained rules, multi-factor access</td><td>Healthcare records, financial compliance</td><td>Medium</td></tr>
+          <tr><td><strong>DAC</strong></td><td>Resource owner's discretion</td><td>User-generated content with sharing</td><td>Google Drive, Dropbox, S3</td><td>Low–Medium</td></tr>
+          <tr><td><strong>MAC</strong></td><td>System-assigned classification labels</td><td>Government, military, high-security</td><td>SELinux, classified document systems</td><td>High</td></tr>
+          <tr><td><strong>ReBAC</strong></td><td>Graph relationship to the resource</td><td>Social/collaborative data with hierarchies</td><td>Google Docs, GitHub teams, Notion</td><td>High</td></tr>
+          <tr><td><strong>ACL</strong></td><td>Explicit per-resource permission list</td><td>OS-level or per-object control</td><td>Linux filesystem, AWS S3 bucket policies</td><td>Medium</td></tr>
+          <tr><td><strong>PBAC</strong></td><td>Centralized policy engine evaluation</td><td>Multi-service, auditable enterprise policy</td><td>OPA (Open Policy Agent), AWS Cedar</td><td>High</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-heading">ABAC — Attribute-Based Access Control</div>
+    <div class="concept-box">
+      ABAC asks: <strong>"Given everything we know about this user, this resource, and this environment — should access be granted?"</strong><br>
+      Instead of a flat role, the policy engine evaluates <em>attributes</em>: user department, resource owner, data classification, time of day, IP address.
+    </div>
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title" style="color:var(--green)">Benefits</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Extremely fine-grained</strong> — "only doctors in cardiology can read cardiology records during business hours"</li>
+          <li><strong>No role explosion</strong> — RBAC grows a new role every time a new combination of permissions is needed; ABAC encodes that in policy attributes</li>
+          <li><strong>Ownership checks built-in</strong> — <code>resource.ownerId == user.id</code> is a single attribute check, not a special endpoint</li>
+          <li><strong>Context-aware</strong> — time, IP, device trust level, and other environmental attributes can gate access dynamically</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red)">Drawbacks</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Policy complexity</strong> — attribute combinations multiply fast; a policy with 5 attributes has hundreds of possible states</li>
+          <li><strong>Hard to audit</strong> — "who can access resource X?" requires evaluating every user's attributes against the policy, not a simple role lookup</li>
+          <li><strong>Attribute management overhead</strong> — user and resource attributes must be kept up-to-date or access decisions are stale</li>
+          <li><strong>Testing difficulty</strong> — covering all attribute combinations in tests is impractical</li>
+        </ul>
+      </div>
+    </div>
+    <div class="text-sm text-muted mb-8" style="margin-top:8px"><strong>Example:</strong> Ownership check — accessing another user's resource returns 403</div>
+    ${simBlock(
+      'curl /api/rbac/resource/alice \\\n  -H "Authorization: Bearer <bob_token>"',
+      'GET', '/api/rbac/resource/alice',
+      { Authorization: 'Bearer eyJhbGci... (bob — ROLE_USER, sub: bob)' },
+      null, 403,
+      { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'Access denied — resource belongs to alice, requester is bob' }
+    )}
+
+    <div class="section-heading">DAC — Discretionary Access Control</div>
+    <div class="concept-box">
+      DAC asks: <strong>"Did the resource owner explicitly grant you access?"</strong><br>
+      The owner of each resource decides who else can read, write, or share it. The system enforces what the owner declares — it does not impose rules from above.
+    </div>
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title" style="color:var(--green)">Benefits</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>User autonomy</strong> — owners share their own resources without needing an admin to update roles</li>
+          <li><strong>Familiar mental model</strong> — "share with…" dialogs in Google Drive and Dropbox are DAC</li>
+          <li><strong>Scales with content</strong> — per-resource permissions don't require new roles as content grows</li>
+          <li><strong>Flexible delegation</strong> — owners can grant others the ability to re-share (can-share vs read-only)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red)">Drawbacks</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Accidental over-sharing</strong> — users often default to "anyone with the link"; data leaks are common</li>
+          <li><strong>No central audit trail</strong> — IT cannot easily answer "who has access to all files containing PII?"</li>
+          <li><strong>Ownership transfer is messy</strong> — when an employee leaves, orphaned resources may have no owner</li>
+          <li><strong>Inconsistent enforcement</strong> — every resource has its own ACL; a misconfigured one is invisible until exploited</li>
+        </ul>
+      </div>
+    </div>
+    ${simBlock(
+      'curl -X POST /api/docs/report-q3/share \\\n  -H "Authorization: Bearer <alice_token>" \\\n  -d \'{"grantee":"bob","permission":"read"}\'',
+      'POST', '/api/docs/report-q3/share',
+      { Authorization: 'Bearer eyJhbGci... (alice — owner)', 'Content-Type': 'application/json' },
+      { grantee: 'bob', permission: 'read' },
+      200,
+      { message: 'Access granted', resource: 'report-q3', grantee: 'bob', permission: 'read', grantedBy: 'alice' }
+    )}
+
+    <div class="section-heading">MAC — Mandatory Access Control</div>
+    <div class="concept-box">
+      MAC asks: <strong>"Does the subject's clearance level meet or exceed the resource's classification?"</strong><br>
+      Access decisions are made by the <em>system</em> based on classification labels — no user, including the resource owner, can override them.
+      The <strong>Bell-LaPadula model</strong> adds two rules: no read up (a Secret user cannot read Top Secret), no write down (a Top Secret user cannot write to Confidential).
+    </div>
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title" style="color:var(--green)">Benefits</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Strong guarantees</strong> — classified data cannot leak to lower clearance levels by any user action, including the owner</li>
+          <li><strong>Centrally enforced</strong> — the system sets labels; individuals cannot bypass policy, even accidentally</li>
+          <li><strong>Audit-friendly</strong> — every access attempt is logged against the classification hierarchy</li>
+          <li><strong>Prevents insider threats</strong> — a malicious employee cannot downgrade and exfiltrate data</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red)">Drawbacks</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Extremely rigid</strong> — legitimate collaboration across classification levels requires explicit policy changes, not a quick "share"</li>
+          <li><strong>High administrative overhead</strong> — every resource and every user must be assigned and maintained with correct labels</li>
+          <li><strong>Poor fit for most commercial apps</strong> — the complexity is only justified when regulatory or national security requirements demand it</li>
+          <li><strong>User friction</strong> — operations that feel natural in consumer apps (copy-paste, email) are locked down</li>
+        </ul>
+      </div>
+    </div>
+    ${simBlock(
+      'curl /api/docs/top-secret-report \\\n  -H "Authorization: Bearer <secret_clearance_token>"',
+      'GET', '/api/docs/top-secret-report',
+      { Authorization: 'Bearer eyJhbGci... (clearance: SECRET)', 'X-Clearance-Level': 'SECRET' },
+      null, 403,
+      { type: '/errors/forbidden', title: 'Insufficient Clearance', status: 403, detail: 'Resource classification TOP_SECRET exceeds subject clearance SECRET. Access denied by MAC policy.' }
+    )}
+
+    <div class="section-heading">ReBAC — Relationship-Based Access Control</div>
+    <div class="concept-box">
+      ReBAC asks: <strong>"Does a path exist in the relationship graph from this user to this resource?"</strong><br>
+      Access is determined by traversing an object relationship graph: user → member-of → team → viewer-of → folder → parent-of → document.
+      Google's <strong>Zanzibar</strong> paper (2019) formalized this; <strong>OpenFGA</strong>, <strong>Ory Keto</strong>, and <strong>SpiceDB</strong> are open-source implementations.
+    </div>
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title" style="color:var(--green)">Benefits</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Natural for hierarchies</strong> — folder → document → comment inheritance is a first-class concept, not a hack on top of roles</li>
+          <li><strong>Handles "shared with me"</strong> — access via group membership, direct share, or inherited from a parent object all resolve the same way</li>
+          <li><strong>Consistent check:</strong> <code>check(user, relation, object)</code> — a single API call answers any access question</li>
+          <li><strong>Scales with data</strong> — adding millions of objects adds tuples, not roles</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red)">Drawbacks</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Graph traversal cost</strong> — deep hierarchies require multi-hop lookups; Zanzibar uses aggressive caching (Zookies) to compensate</li>
+          <li><strong>Relationship tuple storage</strong> — every (user, relation, object) triple must be stored; large sharing graphs require a dedicated store</li>
+          <li><strong>Schema design is hard</strong> — getting the authorization model right upfront is critical; renames break existing tuples</li>
+          <li><strong>Operational complexity</strong> — running OpenFGA or SpiceDB is another service to operate and keep consistent</li>
+        </ul>
+      </div>
+    </div>
+    ${simBlock(
+      'curl /api/docs/shared-folder/file.pdf \\\n  -H "Authorization: Bearer <bob_token>"',
+      'GET', '/api/docs/shared-folder/file.pdf',
+      { Authorization: 'Bearer eyJhbGci... (bob)' },
+      null, 200,
+      { message: 'Access granted via ReBAC', path: 'bob → member → eng-team → viewer → shared-folder → parent → file.pdf', data: '…' }
+    )}
+
+    <div class="section-heading">ACL — Access Control Lists</div>
+    <div class="concept-box">
+      An ACL is a list of <strong>(principal, permission)</strong> pairs attached to each resource.<br>
+      When access is requested, the system looks up the resource's ACL and checks whether the requesting principal has the required permission listed.
+      Linux filesystem permissions (<code>rwxr-xr--</code>) are the most familiar example.
+    </div>
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title" style="color:var(--green)">Benefits</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Per-resource precision</strong> — each object has its own independently configured permission set</li>
+          <li><strong>Simple to reason about</strong> — "who has access to this file?" is answered by reading its ACL directly</li>
+          <li><strong>Well-understood</strong> — OS, databases, cloud storage (S3 bucket policies) all implement ACLs; tooling is mature</li>
+          <li><strong>Granular without a graph</strong> — no hierarchy to traverse; the answer is in the list</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red)">Drawbacks</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Does not scale</strong> — N resources × M users = enormous ACL tables; querying "what can user X access?" requires scanning every ACL</li>
+          <li><strong>No inheritance</strong> — permissions do not propagate from parent to child unless explicitly copied or re-implemented</li>
+          <li><strong>Stale entries</strong> — when a user is deleted, their ACL entries across all resources must be found and cleaned up</li>
+          <li><strong>Audit complexity</strong> — "what does bob have access to?" requires joining across all resource ACLs</li>
+        </ul>
+      </div>
+    </div>
+    ${simBlock(
+      'curl /api/files/budget.xlsx \\\n  -H "Authorization: Bearer <charlie_token>"',
+      'GET', '/api/files/budget.xlsx',
+      { Authorization: 'Bearer eyJhbGci... (charlie)' },
+      null, 403,
+      { type: '/errors/forbidden', title: 'Forbidden', status: 403, detail: 'budget.xlsx ACL: [{alice: owner}, {bob: read}]. charlie has no entry.' }
+    )}
+
+    <div class="section-heading">PBAC — Policy-Based Access Control</div>
+    <div class="concept-box">
+      PBAC externalizes access decisions to a <strong>policy engine</strong> that evaluates declarative rules at runtime.<br>
+      Your application asks: <code>allowed = engine.evaluate(input)</code>. The engine (OPA, AWS Cedar, Casbin) consults a policy document — not hardcoded logic — and returns a decision.
+      This means policies can be updated, versioned, and tested independently of application code.
+    </div>
+    <div class="demo-grid">
+      <div class="card">
+        <div class="card-title" style="color:var(--green)">Benefits</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>Decoupled from code</strong> — policy changes ship without a code deploy; security teams can update rules independently</li>
+          <li><strong>Auditable and version-controlled</strong> — policy files live in Git; every change is a diff, reviewable and traceable</li>
+          <li><strong>Testable in isolation</strong> — policy unit tests run without spinning up the application</li>
+          <li><strong>Consistent across services</strong> — a single OPA sidecar can enforce the same policy across 20 microservices</li>
+          <li><strong>Expressive</strong> — Rego (OPA) and Cedar can express RBAC, ABAC, and ownership checks within a single policy language</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--red)">Drawbacks</div>
+        <ul class="text-sm" style="padding-left:18px;line-height:2.2">
+          <li><strong>New language to learn</strong> — OPA's Rego is non-obvious; Cedar has its own syntax; there's a real onboarding cost</li>
+          <li><strong>Latency</strong> — every access check is an external call (or in-process library call); hot paths need caching</li>
+          <li><strong>Operational overhead</strong> — a policy engine is another service to deploy, monitor, and keep in sync with application data</li>
+          <li><strong>Overkill for small teams</strong> — if one team owns all services, hardcoded RBAC with code review is simpler</li>
+          <li><strong>Data synchronization</strong> — the policy engine needs up-to-date user/resource data; stale input → wrong decisions</li>
+        </ul>
+      </div>
+    </div>
+    ${simBlock(
+      'curl /api/invoices/INV-9901/approve \\\n  -H "Authorization: Bearer <manager_token>" \\\n  -H "X-Department: engineering"',
+      'POST', '/api/invoices/INV-9901/approve',
+      { Authorization: 'Bearer eyJhbGci... (manager, dept: engineering)', 'X-Department': 'engineering' },
+      null, 200,
+      { decision: 'allow', policy: 'invoice-approval-v3', reason: 'user.role=manager AND invoice.department=user.department AND invoice.amount<=50000', invoiceId: 'INV-9901', status: 'approved' }
     )}`;
 }
 
