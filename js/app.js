@@ -2299,25 +2299,96 @@ function partnerApiPage() {
     <div class="divider"></div>
     <div class="section-heading">HMAC Request Signing</div>
 
-    <div class="card">
-      <div class="card-title">How It Works</div>
+    <div class="concept-box">
+      An API key in a header answers one question: <strong>"Who are you?"</strong><br>
+      It does not answer: <em>"Did you intend to send exactly this request, right now, unmodified?"</em><br>
+      HMAC signing adds that second guarantee. The two work as a pair — neither is sufficient alone.
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">The Two-Credential System</div>
+      <table class="comparison-table">
+        <thead><tr><th></th><th>API Key</th><th>Signing Secret</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Purpose</strong></td><td>Identity — "this request is from Alpha Corp"</td><td>Integrity — "Alpha Corp deliberately sent this exact request right now"</td></tr>
+          <tr><td><strong>Sent in every request?</strong></td><td class="con">Yes — in <code>X-Partner-Key</code> header</td><td class="pro">Never — stays on disk at both ends, never transmitted</td></tr>
+          <tr><td><strong>What an attacker gets if stolen</strong></td><td>Can call the API as Alpha Corp</td><td>Nothing — useless without the API key and the request they want to forge</td></tr>
+          <tr><td><strong>What it proves</strong></td><td>Caller knows the key</td><td>Caller possesses the secret AND computed the signature over this exact content</td></tr>
+          <tr><td><strong>Provisioned</strong></td><td>Sent to partner at onboarding</td><td>Sent to partner at onboarding via a <em>separate channel</em> (e.g. encrypted email, secrets vault)</td></tr>
+          <tr><td><strong>Rotated when</strong></td><td>On schedule or after compromise</td><td>Independently — rotating the signing secret does not affect the API key</td></tr>
+        </tbody>
+      </table>
+      <div class="alert alert-info text-sm" style="margin-top:12px">
+        <strong>Key insight:</strong> The signing secret is a <em>pre-shared secret</em> — like a shared passphrase both sides agreed on before the conversation started. Because it is never in a request, an attacker who intercepts your network traffic cannot obtain it. They can see the API key; they can never see the signing secret.
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">What HMAC Actually Computes — Step by Step</div>
+      <div class="text-sm" style="line-height:2.1">
+        HMAC stands for <strong>Hash-based Message Authentication Code</strong>. Think of it as a keyed hash — it produces a fingerprint of your message that only someone who knows the secret key can reproduce.<br><br>
+
+        <strong>Step 1 — Build the canonical string</strong> (the exact bytes that will be signed):<br>
+        <code style="display:block;margin:6px 0;padding:8px;background:var(--bg-3);border-radius:4px">POST\n/api/partner/orders\n1704067200\nba7816bf8f01cfea414140de5dae2ec73b00361bbef0469df84c6a2d3a6afbe</code>
+        That last line is <code>SHA-256(rawBody)</code>. Each component is on its own line separated by <code>\n</code>.<br><br>
+
+        <strong>Step 2 — Feed it into HMAC-SHA256 using the signing secret as the key:</strong><br>
+        <code style="display:block;margin:6px 0;padding:8px;background:var(--bg-3);border-radius:4px">signature = HMAC-SHA256(key=signingSecret, message=canonicalString)</code>
+        The output is a 256-bit (32-byte) value — impossible to predict without the key, even if you know the message.<br><br>
+
+        <strong>Step 3 — Attach to the request:</strong><br>
+        <code style="display:block;margin:6px 0;padding:8px;background:var(--bg-3);border-radius:4px">X-Partner-Key: partner-alpha-key-12345<br>X-Timestamp: 1704067200<br>X-Signature: sha256=a7f3d2b1c9e4f8a2b3c4d5e6f7a8b9c0...</code><br>
+
+        <strong>Step 4 — Server recomputes independently:</strong><br>
+        The server has its own copy of the signing secret (stored in DB, never in transit). It builds the same canonical string from the request it received and runs the same HMAC. If the outputs match, the request is authentic and unmodified.
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Why Each Component of the Canonical String Matters</div>
+      <table class="comparison-table">
+        <thead><tr><th>Component</th><th>What it locks in</th><th>Attack it defeats</th></tr></thead>
+        <tbody>
+          <tr><td><code>METHOD</code></td><td>The HTTP verb (GET, POST, DELETE…)</td><td>Cannot replay a signed GET as a POST to trigger a write</td></tr>
+          <tr><td><code>PATH</code></td><td>The exact endpoint URL</td><td>Cannot take a valid signature for <code>/orders</code> and reuse it on <code>/admin/orders</code></td></tr>
+          <tr><td><code>TIMESTAMP</code></td><td>Unix seconds at signing time</td><td><strong>Replay attack</strong> — server rejects any request where <code>|now − timestamp| &gt; 300s</code>. A captured valid request expires in 5 minutes.</td></tr>
+          <tr><td><code>SHA-256(body)</code></td><td>Cryptographic fingerprint of the full request body</td><td><strong>Body tampering</strong> — change one byte in the body (e.g. <code>amount: 99.99</code> → <code>amount: 9999.99</code>), the body hash changes, the HMAC changes, the server rejects it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">What Each Attack Steals — And What Stops It</div>
+      <table class="comparison-table">
+        <thead><tr><th>Attack</th><th>What attacker has</th><th>What they can do</th><th>Why it fails</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Steal API key only</strong></td><td>API key from leaked env var or logs</td><td>Try to call the API</td><td>Cannot produce a valid <code>X-Signature</code> without the signing secret — server rejects with 401</td></tr>
+          <tr><td><strong>Intercept a request</strong></td><td>Full request with valid API key, timestamp, signature</td><td>Replay the exact same request</td><td>Timestamp is baked into the signature; after 5 min the server rejects it as expired</td></tr>
+          <tr><td><strong>Modify intercepted request</strong></td><td>Full request in transit</td><td>Change <code>amount: 99</code> to <code>amount: 9999</code></td><td>Body change alters SHA-256(body), alters HMAC — server sees signature mismatch, rejects 401</td></tr>
+          <tr><td><strong>Steal signing secret only</strong></td><td>Signing secret but no API key</td><td>Nothing — cannot identify themselves</td><td>Server needs both API key (identity) and matching signature to accept any request</td></tr>
+          <tr><td><strong>Steal both credentials</strong></td><td>API key + signing secret</td><td>Full impersonation</td><td>No defense from HMAC alone — mTLS + IP allowlisting are the next layer</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">One Subtle Rule: Constant-Time Comparison</div>
       <div class="text-sm" style="line-height:1.9">
-        Partners sign every inbound request with <strong>HMAC-SHA256</strong> using a shared signing secret (separate from the API key itself). The server recomputes the signature independently and rejects any mismatch — without the secret, the signature cannot be forged.<br><br>
-        <strong>Canonical string that gets signed:</strong><br>
-        <code>METHOD + "\\n" + PATH + "\\n" + TIMESTAMP + "\\n" + SHA256(body)</code><br><br>
-        <strong>Why include a timestamp?</strong> Limits the replay window to 5 minutes. Even if an attacker captures a valid signed request, it becomes useless after 300 seconds — the server rejects <code>|now &minus; timestamp| &gt; 300</code>.<br><br>
-        <strong>Why include the body hash?</strong> Any modification to the request body changes its SHA-256 hash, which changes the HMAC output. A man-in-the-middle cannot tamper with the body without also regenerating the HMAC — which requires the secret.
+        When comparing the expected signature against the received signature, <strong>never use <code>String.equals()</code></strong>.<br><br>
+        <code>String.equals()</code> returns <code>false</code> as soon as it finds the first differing character — which means it returns faster when the strings differ at position 0 than when they differ at position 30. An attacker can measure this timing difference across thousands of requests and <em>brute-force the correct signature one byte at a time</em> — this is a <strong>timing attack</strong>.<br><br>
+        <code>MessageDigest.isEqual()</code> always compares all bytes regardless of the first mismatch — it takes the same time whether the strings match at byte 0 or byte 31. This eliminates the timing signal.<br><br>
+        <code style="display:block;margin:6px 0;padding:8px;background:var(--bg-3);border-radius:4px">// ✗ Vulnerable to timing attack\nif (expected.equals(incoming)) { ... }\n\n// ✓ Constant-time — always compare all bytes\nif (MessageDigest.isEqual(expected.getBytes(), incoming.getBytes())) { ... }</code>
       </div>
     </div>
 
     <div class="demo-grid">
       <div class="card">
-        <div class="card-title">Client: Generating the Signature (Java)</div>
-        ${curlBlock('// Before sending each signed request:\nInstant now = Instant.now();\nString rawBody = requestBodyJson; // raw JSON, before any parsing\nString bodyHash = sha256Hex(rawBody);\nString canonical = "POST\\n/api/partner/orders\\n"\n    + now.getEpochSecond() + "\\n" + bodyHash;\nString signature = "sha256=" + hmacSha256(signingSecret, canonical);\n\nHttpRequest.newBuilder()\n    .header("X-Partner-Key", partnerKey)\n    .header("X-Timestamp", String.valueOf(now.getEpochSecond()))\n    .header("X-Signature", signature)\n    .header("Content-Type", "application/json")\n    .POST(BodyPublishers.ofString(rawBody))\n    .build();')}
+        <div class="card-title">Client: Generating the Signature</div>
+        ${curlBlock('// Step 1: hash the raw body\nString rawBody = objectMapper.writeValueAsString(orderRequest);\nString bodyHash = sha256Hex(rawBody);\n\n// Step 2: build the canonical string\nlong ts = Instant.now().getEpochSecond();\nString canonical = "POST\\n"\n    + "/api/partner/orders\\n"\n    + ts + "\\n"\n    + bodyHash;\n\n// Step 3: compute HMAC-SHA256 with signing secret\n//   signingSecret is NEVER sent in the request\nString sig = "sha256=" + hmacSha256(signingSecret, canonical);\n\n// Step 4: attach to request headers\nHttpRequest.newBuilder()\n    .header("X-Partner-Key",  partnerKey)   // identity\n    .header("X-Timestamp",    String.valueOf(ts))\n    .header("X-Signature",    sig)           // proof of intent\n    .header("Content-Type",   "application/json")\n    .POST(BodyPublishers.ofString(rawBody))\n    .build();')}
       </div>
       <div class="card">
-        <div class="card-title">Server: Verifying the Signature (Java)</div>
-        ${curlBlock('// 1. Reject stale requests — replay protection\nlong now = Instant.now().getEpochSecond();\nif (Math.abs(now - timestamp) > 300) {\n    return ResponseEntity.status(401)\n        .body(Map.of("error", "Request expired"));\n}\n// 2. Recompute expected signature\nString bodyHash = sha256Hex(rawBody);\nString canonical = method + "\\n" + path + "\\n"\n    + timestamp + "\\n" + bodyHash;\nString expected = "sha256=" + hmacSha256(\n    partner.getSigningSecret(), canonical);\n// 3. Constant-time compare — never String.equals()\n//    String.equals() is vulnerable to timing attacks\nif (!MessageDigest.isEqual(\n        expected.getBytes(), incoming.getBytes())) {\n    return ResponseEntity.status(401)\n        .body(Map.of("error", "Invalid signature"));\n}')}
+        <div class="card-title">Server: Verifying the Signature</div>
+        ${curlBlock('// Step 1: reject stale requests first (fast path)\nlong now = Instant.now().getEpochSecond();\nif (Math.abs(now - timestamp) > 300)\n    return 401("Request expired — outside 5-min window");\n\n// Step 2: look up this partner\'s signing secret\n//   partnerKey → DB → partner.getSigningSecret()\nPartner p = partnerService.resolve(partnerKey);\n\n// Step 3: recompute the expected signature\n//   must use raw body — not parsed/re-serialized\nString bodyHash = sha256Hex(rawBody);\nString canonical = method + "\\n" + path + "\\n"\n    + timestamp + "\\n" + bodyHash;\nString expected = "sha256=" + hmacSha256(\n    p.getSigningSecret(), canonical);\n\n// Step 4: constant-time compare\n//   NEVER use expected.equals(incoming)\nif (!MessageDigest.isEqual(\n        expected.getBytes(), incoming.getBytes()))\n    return 401("Signature mismatch — body may be tampered");\n\n// Passed: identity confirmed + request integrity confirmed\nreturn processRequest(p, rawBody);')}
       </div>
     </div>
 
